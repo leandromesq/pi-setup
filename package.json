@@ -7,7 +7,7 @@
   "license": "UNLICENSED",
   "private": false,
   "bin": {
-    "leandro-pi-setup": "./bin/install.mjs"
+    "pi-setup": "./bin/install.mjs"
   },
   "files": ["extensions", "config", "bin", "README.md"],
   "pi": {

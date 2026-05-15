@@ -13,7 +13,7 @@ npm install -g @earendil-works/pi-coding-agent
 Then install this setup from GitHub:
 
 ```bash
-npx github:leandromesq/pi-setup leandro-pi-setup
+npx github:leandromesq/pi-setup
 ```
 
 Alternatively, with Pi's package manager:
