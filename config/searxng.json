@@ -1,0 +1,5 @@
+{
+  "searxngUrl": "https://searx.be",
+  "timeoutMs": 30000,
+  "maxResults": 10
+}

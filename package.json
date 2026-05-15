@@ -1,0 +1,21 @@
+{
+  "name": "@leandromesq/pi-setup",
+  "version": "0.1.0",
+  "description": "Leandro's personal Pi setup: extensions and config bootstrap.",
+  "type": "module",
+  "keywords": ["pi-package", "pi", "pi-coding-agent"],
+  "license": "UNLICENSED",
+  "private": false,
+  "bin": {
+    "leandro-pi-setup": "./bin/install.mjs"
+  },
+  "files": ["extensions", "config", "bin", "README.md"],
+  "pi": {
+    "extensions": ["./extensions"]
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*",
+    "typebox": "*"
+  }
+}
