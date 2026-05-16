@@ -111,14 +111,14 @@ function formatContext(usage: ContextUsage | undefined) {
 
 function formatPathSegment(cwd: string, theme: any) {
   const short = shortCwd(cwd).replace(/\\/g, "/");
-  if (short === "~") return theme.fg("muted", " ~");
+  if (short === "~") return theme.fg("text", theme.bold(" ~"));
 
   const slash = short.lastIndexOf("/");
-  if (slash === -1) return `${theme.fg("muted", " ")}${theme.fg("text", short)}`;
+  if (slash === -1) return `${theme.fg("dim", " ")}${theme.fg("text", theme.bold(short))}`;
 
   const parent = short.slice(0, slash + 1);
   const base = short.slice(slash + 1);
-  return `${theme.fg("dim", ` ${parent}`)}${theme.fg("muted", base)}`;
+  return `${theme.fg("dim", ` ${parent}`)}${theme.fg("text", theme.bold(base))}`;
 }
 
 function contextColor(percent: number | null | undefined) {
