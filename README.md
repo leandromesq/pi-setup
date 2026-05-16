@@ -1,6 +1,20 @@
 # Leandro Pi Setup
 
-Personal Pi setup package containing global extensions and bootstrap config.
+Personal Pi setup package containing global extensions, theme, and bootstrap config.
+
+Each extension is published as its own Pi extension entry so it can be enabled, disabled, or filtered independently:
+
+- `favs`
+- `pi-ui`
+- `pi-update`
+- `pwsh-user-bash`
+- `scratchpad`
+- `yeet`
+- `zed`
+
+Included theme:
+
+- `github-dark-default`
 
 ## Install on a new machine
 
@@ -22,21 +36,8 @@ Alternatively, with Pi's package manager:
 pi install git:github.com/leandromesq/pi-setup
 ```
 
-The `npx` bootstrap also writes `~/.pi/searxng.json` and adds these packages to `~/.pi/agent/settings.json`:
+The `npx` bootstrap also adds these packages to `~/.pi/agent/settings.json`:
 
 - `npm:pi-hermes-memory`
 - `npm:pi-extmgr`
-- `npm:pi-searxng`
 - `git:github.com/leandromesq/pi-setup`
-
-## Notes
-
-`pi-searxng` is configured to use a public SearXNG instance for now. Replace `~/.pi/searxng.json` with your local Docker URL later:
-
-```json
-{
-  "searxngUrl": "http://localhost:8080",
-  "timeoutMs": 30000,
-  "maxResults": 10
-}
-```

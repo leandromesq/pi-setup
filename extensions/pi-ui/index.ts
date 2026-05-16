@@ -1,8 +1,8 @@
 import path from "node:path";
 import { CustomEditor, type ExtensionAPI, type ExtensionContext, type ContextUsage, type KeybindingsManager } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth, visibleWidth, type Component, type EditorTheme, type TUI } from "@earendil-works/pi-tui";
-import { renderFixedEditorCluster } from "./pi-ui-fixed-editor/cluster.ts";
-import { emergencyTerminalModeReset, TerminalSplitCompositor } from "./pi-ui-fixed-editor/terminal-split.ts";
+import { renderFixedEditorCluster } from "./fixed-editor/cluster.ts";
+import { emergencyTerminalModeReset, TerminalSplitCompositor } from "./fixed-editor/terminal-split.ts";
 
 const RESET = "\x1b[0m";
 const BOLD = "\x1b[1m";
@@ -158,11 +158,72 @@ function joinSegments(width: number, segments: string[]) {
   return truncateToWidth(line, width, "");
 }
 
-function renderHeader(width: number, phase: number, subtitleText: string) {
-  const lines = TITLE_LINES.map((line, row) => gradientText(center(line, width), phase + row * 0.045));
-  const subtitle = center(subtitleText, width);
+function padVisible(text: string, width: number) {
+  const length = visibleWidth(text);
+  if (length >= width) return truncateToWidth(text, width, "");
+  return `${text}${" ".repeat(width - length)}`;
+}
 
-  return ["", ...lines, `${BOLD}${gradientText(subtitle, phase + 0.18)}${RESET}`, ""];
+function headerShortcutBox(width: number) {
+  const shortcuts = [
+    ["Ctrl+L", "model"],
+    ["⇧Tab", "thinking"],
+    ["Alt+M/P", "favs"],
+    ["Alt+1-4", "slots"],
+    ["Alt+S", "stash"],
+    ["Alt+N", "notes"],
+    ["Esc Esc", "tree"],
+    ["Ctrl+O", "tools"],
+  ];
+
+  const innerWidth = Math.max(12, width - 2);
+  const title = `${BOLD}${fg(SKY, "shortcuts")}${RESET}`;
+  const rows = shortcuts.slice(0, 4).map(([key, label], index) => {
+    const next = shortcuts[index + 4];
+    const left = `${fg(ICE, key)} ${fg([110, 118, 129], label)}`;
+    const right = next ? `${fg(ICE, next[0])} ${fg([110, 118, 129], next[1])}` : "";
+    const gap = Math.max(2, innerWidth - visibleWidth(left) - visibleWidth(right));
+    return `│${padVisible(`${left}${" ".repeat(gap)}${right}`, innerWidth)}│`;
+  });
+
+  return [
+    `╭${"─".repeat(innerWidth)}╮`,
+    `│${padVisible(title, innerWidth)}│`,
+    ...rows,
+    `╰${"─".repeat(innerWidth)}╯`,
+  ];
+}
+
+function renderHeader(width: number, phase: number, subtitleText: string) {
+  const logoWidth = Math.max(...TITLE_LINES.map((line) => visibleWidth(line)));
+  const leftMargin = width >= 80 ? 2 : 0;
+  const gap = 3;
+  const minBoxWidth = 28;
+  const maxBoxWidth = 48;
+  const maxLogoBlockWidth = Math.max(logoWidth + 4, width - leftMargin - gap - minBoxWidth);
+  const subtitleWidth = visibleWidth(`  ${subtitleText}`);
+  const logoBlockWidth = Math.max(logoWidth + 4, Math.min(maxLogoBlockWidth, subtitleWidth));
+  const logoInset = Math.max(0, Math.floor((logoBlockWidth - logoWidth) / 2));
+  const canShowBox = width >= leftMargin + logoBlockWidth + gap + 24;
+  const logoLines = [
+    ...TITLE_LINES.map((line, row) => gradientText(padVisible(`${" ".repeat(logoInset)}${line}`, logoBlockWidth), phase + row * 0.045)),
+    `${BOLD}${gradientText(padVisible(truncateToWidth(`  ${subtitleText}`, logoBlockWidth, "…"), logoBlockWidth), phase + 0.18)}${RESET}`,
+  ];
+
+  const prefix = " ".repeat(leftMargin);
+  if (!canShowBox) return ["", ...logoLines.map((line) => truncateToWidth(`${prefix}${line}`, width, "")), ""];
+
+  const boxWidth = Math.min(maxBoxWidth, Math.max(minBoxWidth, width - leftMargin - logoBlockWidth - gap));
+  const boxLines = headerShortcutBox(boxWidth);
+  const rows = Math.max(logoLines.length, boxLines.length);
+  const lines = [];
+  for (let i = 0; i < rows; i++) {
+    const logo = padVisible(logoLines[i] ?? "", logoBlockWidth);
+    const box = boxLines[i] ?? "";
+    lines.push(truncateToWidth(`${prefix}${logo}${" ".repeat(gap)}${box}`, width, ""));
+  }
+
+  return ["", ...lines, ""];
 }
 
 function formatDuration(ms: number) {
@@ -171,8 +232,8 @@ function formatDuration(ms: number) {
   const minutes = Math.floor((totalSeconds % 3600) / 60);
   const seconds = totalSeconds % 60;
 
-  if (hours > 0) return `${hours}h${minutes}min${seconds}s`;
-  if (minutes > 0) return `${minutes}min${seconds}s`;
+  if (hours > 0) return `${hours}h${minutes}m${seconds}s`;
+  if (minutes > 0) return `${minutes}m${seconds}s`;
   return `${seconds}s`;
 }
 

@@ -104,8 +104,8 @@ export function renderFixedEditorCluster(input: FixedEditorClusterInput): FixedE
 
   return extractCursor([
     ...status,
-    ...top,
     ...editorLines,
+    ...top,
     ...secondary,
     ...transcript,
     ...lastPrompt,

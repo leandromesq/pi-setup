@@ -1,17 +1,38 @@
 {
   "name": "@leandromesq/pi-setup",
   "version": "0.1.0",
-  "description": "Leandro's personal Pi setup: extensions and config bootstrap.",
+  "description": "Leandro's personal Pi setup: extensions, theme, and bootstrap config.",
   "type": "module",
-  "keywords": ["pi-package", "pi", "pi-coding-agent"],
+  "keywords": [
+    "pi-package",
+    "pi",
+    "pi-coding-agent"
+  ],
   "license": "UNLICENSED",
   "private": false,
   "bin": {
     "pi-setup": "./bin/install.mjs"
   },
-  "files": ["extensions", "config", "bin", "README.md"],
+  "files": [
+    "extensions",
+    "bin",
+    "README.md",
+    "themes"
+  ],
   "pi": {
-    "extensions": ["./extensions"]
+    "extensions": [
+      "./extensions/favs/index.ts",
+      "./extensions/pi-ui/index.ts",
+      "./extensions/pi-update/index.ts",
+      "./extensions/pwsh-user-bash/index.ts",
+      "./extensions/scratchpad/index.ts",
+      "./extensions/yeet/index.ts",
+      "./extensions/diff/index.ts",
+      "./extensions/zed/index.ts"
+    ],
+    "themes": [
+      "./themes/github-dark-default.json"
+    ]
   },
   "peerDependencies": {
     "@earendil-works/pi-coding-agent": "*",
