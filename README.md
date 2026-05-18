@@ -4,7 +4,9 @@ Personal Pi setup package containing global extensions, theme, and bootstrap con
 
 Each extension is published as its own Pi extension entry so it can be enabled, disabled, or filtered independently:
 
+- `diff`
 - `favs`
+- `git-pr` (`/git <target-branch>`)
 - `pi-ui`
 - `pi-update`
 - `pwsh-user-bash`

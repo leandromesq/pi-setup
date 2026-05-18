@@ -22,6 +22,7 @@
   "pi": {
     "extensions": [
       "./extensions/favs/index.ts",
+      "./extensions/git-pr/index.ts",
       "./extensions/pi-ui/index.ts",
       "./extensions/pi-update/index.ts",
       "./extensions/pwsh-user-bash/index.ts",
