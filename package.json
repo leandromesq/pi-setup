@@ -21,7 +21,6 @@
   ],
   "pi": {
     "extensions": [
-      "./extensions/extension-aliases/index.ts",
       "./extensions/favs/index.ts",
       "./extensions/git-pr/index.ts",
       "./extensions/pi-ui/index.ts",

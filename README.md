@@ -6,14 +6,6 @@ Each extension is published as its own Pi extension entry so it can be enabled, 
 
 ## Extensions
 
-### `extension-aliases`
-
-Shortens Pi package source labels for extensions from this setup package. For example, package extension labels like `leandromesq/pi-setup:favs` are displayed as `pi-setup:favs`, with matching shorter autocomplete/source tags. Additional aliases can be supplied with the `PI_EXTENSION_ALIASES` environment variable as a JSON object mapping source strings to display names.
-
-Commands:
-
-- `/extension-aliases` — show the configured source aliases.
-
 ### `diff`
 
 Tracks files changed during the last agent run. It records the git status baseline at agent start, watches `edit`/`write` tool results, and reports changed files when the run ends.
