@@ -32,6 +32,7 @@ const { spawn } = require("child_process") as any;
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
+import { applyExtensionDefaults } from "../themeMap.ts";
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -238,7 +239,9 @@ export default function (pi: ExtensionAPI) {
     // ── Global state ──────────────────────────────────────────────────────────
     let mode: OrchestratorMode = "subagent";
     let widgetCtx: any;
-    let savedTools: string[] = [];  // snapshot before team mode locks tools
+    let baseTools: string[] = [];
+    const subagentToolNames = ["subagent_create", "subagent_continue", "subagent_remove", "subagent_list"];
+    const orchestratorToolNames = new Set([...subagentToolNames, "dispatch_agent", "run_chain"]);
 
     // ── Subagent state ────────────────────────────────────────────────────────
     const agents: Map<number, SubState> = new Map();
@@ -771,7 +774,7 @@ export default function (pi: ExtensionAPI) {
                 const full = textChunks.join("");
                 state.lastWork = full.split("\n").filter((l: string) => l.trim()).pop() || "";
                 updateTeamWidget();
-                ctx.ui.notify(`${displayName(state.def.name)} ${state.status} in ${Math.round(state.elapsed / 1000)}s`, state.status === "done" ? "success" : "error");
+                ctx.ui.notify(`${displayName(state.def.name)} ${state.status} in ${Math.round(state.elapsed / 1000)}s`, state.status === "done" ? "info" : "error");
                 resolve({ output: full, exitCode: code ?? 1, elapsed: state.elapsed });
             });
         });
@@ -893,7 +896,15 @@ export default function (pi: ExtensionAPI) {
 
     // ── Mode management ───────────────────────────────────────────────────────
 
+    function activeToolsForMode(): string[] {
+        if (mode === "team") return ["dispatch_agent"];
+        if (mode === "chain") return Array.from(new Set([...baseTools, "run_chain"]));
+        return Array.from(new Set([...baseTools, ...subagentToolNames]));
+    }
+
     function applyMode(ctx: any) {
+        pi.setActiveTools(activeToolsForMode());
+
         // Clear widgets from non-active modes first
         ctx.ui.setWidget("agent-team", undefined);
         ctx.ui.setWidget("agent-chain", undefined);
@@ -914,19 +925,7 @@ export default function (pi: ExtensionAPI) {
     }
 
     function switchMode(newMode: OrchestratorMode, ctx: any) {
-        // Restore tools when leaving team mode
-        if (mode === "team" && newMode !== "team") {
-            pi.setActiveTools(savedTools.length ? savedTools : pi.getActiveTools());
-        }
-
         mode = newMode;
-
-        // Lock tools when entering team mode
-        if (mode === "team") {
-            savedTools = pi.getActiveTools();
-            pi.setActiveTools(["dispatch_agent"]);
-        }
-
         savePrefs(currentPrefs());
         applyMode(ctx);
     }
@@ -935,6 +934,7 @@ export default function (pi: ExtensionAPI) {
 
     pi.registerTool({
         name: "subagent_create",
+        label: "Subagent Create",
         description: "Spawn a background subagent to perform a task. Returns the subagent ID immediately. Results are delivered as a follow-up message when finished (unless notifyMain is false).",
         parameters: Type.Object({
             task: Type.String({ description: "The complete task description for the subagent to perform" }),
@@ -950,12 +950,13 @@ export default function (pi: ExtensionAPI) {
             agents.set(id, state);
             updateSubWidgets();
             spawnSubagent(state, args.task, ctx, args.notifyMain !== false).catch(() => {});
-            return { content: [{ type: "text", text: `Subagent #${id} spawned.${args.notifyMain === false ? " Results will be shown in widget only." : ""}` }] };
+            return { content: [{ type: "text", text: `Subagent #${id} spawned.${args.notifyMain === false ? " Results will be shown in widget only." : ""}` }], details: { id, status: "running", notifyMain: args.notifyMain !== false } };
         },
     });
 
     pi.registerTool({
         name: "subagent_continue",
+        label: "Subagent Continue",
         description: "Continue an existing subagent's conversation with follow-up instructions. The subagent must be finished.",
         parameters: Type.Object({
             id: Type.Number({ description: "The ID of the subagent to continue" }),
@@ -965,42 +966,44 @@ export default function (pi: ExtensionAPI) {
         execute: async (_callId, args, _signal, _onUpdate, ctx) => {
             widgetCtx = ctx;
             const state = agents.get(args.id);
-            if (!state) return { content: [{ type: "text", text: `Error: No subagent #${args.id} found.` }] };
-            if (state.status === "running") return { content: [{ type: "text", text: `Error: Subagent #${args.id} is still running.` }] };
+            if (!state) return { content: [{ type: "text", text: `Error: No subagent #${args.id} found.` }], details: { id: args.id, status: "error", error: "not_found" } };
+            if (state.status === "running") return { content: [{ type: "text", text: `Error: Subagent #${args.id} is still running.` }], details: { id: args.id, status: "error", error: "running" } };
 
             state.status = "running"; state.task = args.prompt;
             state.textChunks = []; state.elapsed = 0; state.turnCount++;
             updateSubWidgets();
             ctx.ui.notify(`Continuing Subagent #${args.id} (Turn ${state.turnCount})…`, "info");
             spawnSubagent(state, args.prompt, ctx, args.notifyMain !== false).catch(() => {});
-            return { content: [{ type: "text", text: `Subagent #${args.id} continuing (Turn ${state.turnCount}).` }] };
+            return { content: [{ type: "text", text: `Subagent #${args.id} continuing (Turn ${state.turnCount}).` }], details: { id: args.id, status: "running", turnCount: state.turnCount, notifyMain: args.notifyMain !== false } };
         },
     });
 
     pi.registerTool({
         name: "subagent_remove",
+        label: "Subagent Remove",
         description: "Remove a specific subagent and its widget. Kills it if currently running.",
         parameters: Type.Object({ id: Type.Number({ description: "The ID of the subagent to remove" }) }),
         execute: async (_callId, args, _signal, _onUpdate, ctx) => {
             widgetCtx = ctx;
             const state = agents.get(args.id);
-            if (!state) return { content: [{ type: "text", text: `Error: No subagent #${args.id} found.` }] };
+            if (!state) return { content: [{ type: "text", text: `Error: No subagent #${args.id} found.` }], details: { id: args.id, status: "error", error: "not_found" } };
             if (state.proc && state.status === "running") state.proc.kill("SIGTERM");
             ctx.ui.setWidget(`sub-${args.id}`, undefined);
             agents.delete(args.id);
-            return { content: [{ type: "text", text: `Subagent #${args.id} removed.` }] };
+            return { content: [{ type: "text", text: `Subagent #${args.id} removed.` }], details: { id: args.id, status: "removed" } };
         },
     });
 
     pi.registerTool({
         name: "subagent_list",
+        label: "Subagent List",
         description: "List all active and finished subagents with their IDs, tasks, and status.",
         parameters: Type.Object({}),
         execute: async () => {
-            if (agents.size === 0) return { content: [{ type: "text", text: "No active subagents." }] };
+            if (agents.size === 0) return { content: [{ type: "text", text: "No active subagents." }], details: { agents: [] } };
             const list = Array.from(agents.values())
                 .map(s => `#${s.id} [${s.status.toUpperCase()}] (Turn ${s.turnCount}) - ${s.task}`).join("\n");
-            return { content: [{ type: "text", text: `Subagents:\n${list}` }] };
+            return { content: [{ type: "text", text: `Subagents:\n${list}` }], details: { agents: Array.from(agents.values()).map(s => ({ id: s.id, status: s.status, task: s.task, turnCount: s.turnCount, toolCount: s.toolCount, elapsed: s.elapsed })) } };
         },
     });
 
@@ -1108,7 +1111,7 @@ export default function (pi: ExtensionAPI) {
             if (newMode === mode) { ctx.ui.notify(`Already in ${mode} mode`, "info"); return; }
 
             switchMode(newMode as OrchestratorMode, ctx);
-            ctx.ui.notify(`Switched to ${mode} mode`, "success");
+            ctx.ui.notify(`Switched to ${mode} mode`, "info");
         },
     });
 
@@ -1122,29 +1125,15 @@ export default function (pi: ExtensionAPI) {
                 const task = args?.trim();
                 if (!task) { ctx.ui.notify("Usage: /sub <task>", "error"); return; }
 
-                // Log: before session file creation
-                const logFile = path.join(os.homedir(), ".pi", "agent", "orchestrator-debug.log");
-                fs.appendFileSync(logFile, `[${new Date().toISOString()}] /sub "${task}" — creating session file\n`);
-
                 const id = nextId++;
                 const state: SubState = {
                     id, status: "running", task, textChunks: [], toolCount: 0,
                     elapsed: 0, sessionFile: makeSubagentSessionFile(id), turnCount: 1,
                 };
                 agents.set(id, state);
-
-                // Log: before updateSubWidgets
-                fs.appendFileSync(logFile, `[${new Date().toISOString()}] /sub #${id} — before updateSubWidgets\n`);
                 updateSubWidgets();
-
-                // Log: before spawnSubagent
-                fs.appendFileSync(logFile, `[${new Date().toISOString()}] /sub #${id} — before spawnSubagent\n`);
-                spawnSubagent(state, task, ctx).catch((err: any) => {
-                    fs.appendFileSync(logFile, `[${new Date().toISOString()}] /sub #${id} spawnSubagent rejection: ${err?.message || err}\n`);
-                });
+                spawnSubagent(state, task, ctx).catch(() => {});
             } catch (err: any) {
-                const logFile = path.join(os.homedir(), ".pi", "agent", "orchestrator-debug.log");
-                fs.appendFileSync(logFile, `[${new Date().toISOString()}] /sub ERROR: ${err?.message || err}\n${err?.stack || ""}\n`);
                 ctx.ui.notify(`Subagent error: ${err?.message || err}`, "error");
             }
         },
@@ -1208,7 +1197,7 @@ export default function (pi: ExtensionAPI) {
             ctx.ui.notify(
                 total === 0 ? "No subagents to clear."
                     : `Cleared ${total} subagent${total !== 1 ? "s" : ""}${killed > 0 ? ` (${killed} killed)` : ""}.`,
-                total === 0 ? "info" : "success"
+                "info"
             );
         },
     });
@@ -1408,8 +1397,11 @@ ${catalog}
     // ── session_start ─────────────────────────────────────────────────────────
 
     pi.on("session_start", async (_event, ctx) => {
+        applyExtensionDefaults(import.meta.url, ctx);
         widgetCtx = ctx;
         contextWindow = (ctx as any).model?.contextWindow || 0;
+        const discoveredBaseTools = pi.getActiveTools().filter(name => !orchestratorToolNames.has(name));
+        if (discoveredBaseTools.length > 0 || baseTools.length === 0) baseTools = discoveredBaseTools;
 
         // Kill running subagents, clear all widgets
         for (const [id, state] of Array.from(agents.entries())) {
@@ -1450,12 +1442,6 @@ ${catalog}
             ? chains.find(c => c.name === prefs.activeChain)
             : chains[0];
         if (chainToActivate) activateChain(chainToActivate);
-
-        // Apply tool lock if restoring team mode
-        if (mode === "team") {
-            savedTools = pi.getActiveTools();
-            pi.setActiveTools(["dispatch_agent"]);
-        }
 
         const teamSummary = Object.keys(teams).length > 0
             ? `${Object.keys(teams).length} teams · ${activeTeamName || Object.keys(teams)[0] || "none"} active`
