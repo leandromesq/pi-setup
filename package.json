@@ -30,7 +30,8 @@
       "./extensions/yeet/index.ts",
       "./extensions/diff/index.ts",
       "./extensions/zed/index.ts",
-      "./extensions/obsidian/index.ts"
+      "./extensions/obsidian/index.ts",
+      "./extensions/orchestrator/index.ts"
     ],
     "themes": [
       "./themes/github-dark-default.json"
