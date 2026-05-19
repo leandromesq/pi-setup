@@ -341,28 +341,32 @@ export default function (pi: ExtensionAPI) {
         const statusVis = statusStr.length + timeStr.length;
 
         const filled = Math.ceil(state.contextPct / 20);
-        const barStr = `[${("#").repeat(filled)}${("-").repeat(5 - filled)}] ${Math.ceil(state.contextPct)}%`;
-        const ctxLine = theme.fg("dim", barStr);
+        const barColor = state.contextPct > 80 ? "error" : state.contextPct > 50 ? "warning" : "success";
+        const barStr = theme.fg(barColor, "#".repeat(filled)) + theme.fg("dim", "-".repeat(5 - filled)) + ` ${Math.ceil(state.contextPct)}%`;
+        const ctxLine = barStr;
 
-        // Idle: show description. Running/done: show last work output
+        // Idle: show description in a distinct color. Running/done: show last work output
         const workRaw = (state.task && state.lastWork) ? state.lastWork
             : state.task ? state.task
             : state.def.description;
         const workText = trunc(workRaw, Math.min(50, w - 1));
-        const workLine = theme.fg("muted", workText);
+        const workColor = state.status === "idle" ? "info" : state.status === "running" ? "accent" : "muted";
+        const workLine = theme.fg(workColor, workText);
 
-        const top = "┌" + "─".repeat(w) + "┐";
-        const bot = "└" + "─".repeat(w) + "┘";
+        // Border color matches status for visual pop
+        const borderColor = state.status === "idle" ? "dim" : sc;
+        const top = theme.fg(borderColor, "┌" + "─".repeat(w) + "┐");
+        const bot = theme.fg(borderColor, "└" + "─".repeat(w) + "┘");
         const bdr = (content: string, visLen: number) =>
-            theme.fg("dim", "│") + content + " ".repeat(Math.max(0, w - visLen)) + theme.fg("dim", "│");
+            theme.fg(borderColor, "│") + content + " ".repeat(Math.max(0, w - visLen)) + theme.fg(borderColor, "│");
 
         return [
-            theme.fg("dim", top),
+            top,
             bdr(" " + nameStr, 1 + nameVis),
             bdr(" " + statusLine, 1 + statusVis),
-            bdr(" " + ctxLine, 1 + barStr.length),
+            bdr(" " + ctxLine, 1 + visibleWidth(ctxLine)),
             bdr(" " + workLine, 1 + workText.length),
-            theme.fg("dim", bot),
+            bot,
         ];
     }
 
@@ -890,6 +894,10 @@ export default function (pi: ExtensionAPI) {
     // ── Mode management ───────────────────────────────────────────────────────
 
     function applyMode(ctx: any) {
+        // Clear widgets from non-active modes first
+        ctx.ui.setWidget("agent-team", undefined);
+        ctx.ui.setWidget("agent-chain", undefined);
+
         if (mode === "team") {
             updateTeamWidget();
             ctx.ui.setStatus("orchestrator", `Mode: team · ${activeTeamName} (${agentStates.size})`);
@@ -897,6 +905,8 @@ export default function (pi: ExtensionAPI) {
             updateChainWidget();
             ctx.ui.setStatus("orchestrator", `Mode: chain · ${activeChain?.name || "no chain"}`);
         } else {
+            // Clear subagent widgets too on mode switch? No — preserve them, user might come back.
+            // Just re-render existing subagent widgets.
             updateSubWidgets();
             ctx.ui.setStatus("orchestrator", `Mode: subagent (${agents.size} active)`);
         }
