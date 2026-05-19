@@ -28,7 +28,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { DynamicBorder } from "@earendil-works/pi-coding-agent";
 import { Container, Text, type AutocompleteItem, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
-import { spawn } from "child_process";
+const { spawn } = require("child_process") as any;
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -274,17 +274,15 @@ export default function (pi: ExtensionAPI) {
     function updateSubWidgets() {
         if (!widgetCtx) return;
         for (const [id, state] of Array.from(agents.entries())) {
-            try {
-                widgetCtx.ui.setWidget(`sub-${id}`, (_tui: any, theme: any) => {
-                    try {
-                        const container = new Container();
-                        const borderFn = (s: string) => theme.fg("dim", s);
-                        container.addChild(new Text("", 0, 0));
-                        container.addChild(new DynamicBorder(borderFn));
-                        const content = new Text("", 1, 0);
-                        container.addChild(content);
-                        container.addChild(new DynamicBorder(borderFn));
-
+            const key = `sub-${id}`;
+            widgetCtx.ui.setWidget(key, (_tui: any, theme: any) => {
+                const container = new Container();
+                const borderFn = (s: string) => theme.fg("dim", s);
+                container.addChild(new Text("", 0, 0));
+                container.addChild(new DynamicBorder(borderFn));
+                const content = new Text("", 1, 0);
+                container.addChild(content);
+                container.addChild(new DynamicBorder(borderFn));
                 return {
                     render(width: number): string[] {
                         const lines: string[] = [];
@@ -311,15 +309,7 @@ export default function (pi: ExtensionAPI) {
                     },
                     invalidate() { container.invalidate(); },
                 };
-            } catch (innerErr: any) {
-                const logFile = path.join(os.homedir(), ".pi", "agent", "orchestrator-debug.log");
-                fs.appendFileSync(logFile, `[${new Date().toISOString()}] updateSubWidgets widget factory error #${id}: ${innerErr?.message || innerErr}\n`);
-            }
             });
-            } catch (outerErr: any) {
-                const logFile = path.join(os.homedir(), ".pi", "agent", "orchestrator-debug.log");
-                fs.appendFileSync(logFile, `[${new Date().toISOString()}] updateSubWidgets setWidget error #${id}: ${outerErr?.message || outerErr}\n`);
-            }
         }
     }
 
@@ -597,9 +587,22 @@ export default function (pi: ExtensionAPI) {
                 prompt,
             ], { stdio: ["ignore", "pipe", "pipe"], env: { ...process.env } });
 
+            // Register error listener FIRST — before any state mutation.
+            // On Windows, spawn can fail synchronously; without a listener
+            // the 'error' event becomes an uncaught exception that crashes pi.
+            let timer: ReturnType<typeof setInterval> | null = null;
+            proc.on("error", (err: any) => {
+                if (timer) clearInterval(timer);
+                state.status = "error";
+                state.proc = undefined;
+                state.textChunks.push(`Error: ${err.message}`);
+                updateSubWidgets();
+                resolve();
+            });
+
             state.proc = proc;
             const startTime = Date.now();
-            const timer = setInterval(() => { state.elapsed = Date.now() - startTime; updateSubWidgets(); }, 1000);
+            timer = setInterval(() => { state.elapsed = Date.now() - startTime; updateSubWidgets(); }, 1000);
             let buffer = "";
 
             proc.stdout!.setEncoding("utf-8");
@@ -627,7 +630,7 @@ export default function (pi: ExtensionAPI) {
                 if (chunk.trim()) { state.textChunks.push(chunk); updateSubWidgets(); }
             });
 
-            proc.on("close", (code) => {
+            proc.on("close", (code: number | null) => {
                 if (buffer.trim()) {
                     try {
                         const ev = JSON.parse(buffer);
@@ -656,15 +659,6 @@ export default function (pi: ExtensionAPI) {
                     }, { deliverAs: "followUp", triggerTurn: true });
                 }
 
-                resolve();
-            });
-
-            proc.on("error", (err) => {
-                clearInterval(timer);
-                state.status = "error";
-                state.proc = undefined;
-                state.textChunks.push(`Error: ${err.message}`);
-                updateSubWidgets();
                 resolve();
             });
         });
@@ -709,6 +703,14 @@ export default function (pi: ExtensionAPI) {
         const textChunks: string[] = [];
         return new Promise((resolve) => {
             const proc = spawn(getPiCommand(), args, { stdio: ["ignore", "pipe", "pipe"], env: { ...process.env } });
+
+            // Register error listener FIRST — before any state reads/writes
+            proc.on("error", (err: any) => {
+                clearInterval(state.timer);
+                state.status = "error"; state.lastWork = `Error: ${err.message}`; updateTeamWidget();
+                resolve({ output: `Error spawning agent: ${err.message}`, exitCode: 1, elapsed: Date.now() - startTime });
+            });
+
             let buffer = "";
 
             proc.stdout!.setEncoding("utf-8");
@@ -743,7 +745,7 @@ export default function (pi: ExtensionAPI) {
             proc.stderr!.setEncoding("utf-8");
             proc.stderr!.on("data", () => {});
 
-            proc.on("close", (code) => {
+            proc.on("close", (code: number | null) => {
                 if (buffer.trim()) {
                     try {
                         const ev = JSON.parse(buffer);
@@ -760,12 +762,6 @@ export default function (pi: ExtensionAPI) {
                 updateTeamWidget();
                 ctx.ui.notify(`${displayName(state.def.name)} ${state.status} in ${Math.round(state.elapsed / 1000)}s`, state.status === "done" ? "success" : "error");
                 resolve({ output: full, exitCode: code ?? 1, elapsed: state.elapsed });
-            });
-
-            proc.on("error", (err) => {
-                clearInterval(state.timer);
-                state.status = "error"; state.lastWork = `Error: ${err.message}`; updateTeamWidget();
-                resolve({ output: `Error spawning agent: ${err.message}`, exitCode: 1, elapsed: Date.now() - startTime });
             });
         });
     }
@@ -795,7 +791,15 @@ export default function (pi: ExtensionAPI) {
 
         return new Promise((resolve) => {
             const proc = spawn(getPiCommand(), args, { stdio: ["ignore", "pipe", "pipe"], env: { ...process.env } });
-            const timer = setInterval(() => { state.elapsed = Date.now() - startTime; updateChainWidget(); }, 1000);
+
+            // Register error listener FIRST — before any state reads/writes
+            let timer: ReturnType<typeof setInterval> | null = null;
+            proc.on("error", (err: any) => {
+                if (timer) clearInterval(timer);
+                resolve({ output: `Error: ${err.message}`, exitCode: 1, elapsed: Date.now() - startTime });
+            });
+
+            timer = setInterval(() => { state.elapsed = Date.now() - startTime; updateChainWidget(); }, 1000);
             let buffer = "";
 
             proc.stdout!.setEncoding("utf-8");
@@ -819,7 +823,7 @@ export default function (pi: ExtensionAPI) {
             proc.stderr!.setEncoding("utf-8");
             proc.stderr!.on("data", () => {});
 
-            proc.on("close", (code) => {
+            proc.on("close", (code: number | null) => {
                 if (buffer.trim()) {
                     try {
                         const ev = JSON.parse(buffer);
@@ -833,11 +837,6 @@ export default function (pi: ExtensionAPI) {
                 state.lastWork = output.split("\n").filter((l: string) => l.trim()).pop() || "";
                 if (code === 0) agentSessions.set(agentKey, sessionFile);
                 resolve({ output, exitCode: code ?? 1, elapsed: state.elapsed });
-            });
-
-            proc.on("error", (err) => {
-                clearInterval(timer);
-                resolve({ output: `Error: ${err.message}`, exitCode: 1, elapsed: Date.now() - startTime });
             });
         });
     }
@@ -933,7 +932,7 @@ export default function (pi: ExtensionAPI) {
             };
             agents.set(id, state);
             updateSubWidgets();
-            spawnSubagent(state, args.task, ctx, args.notifyMain !== false);
+            spawnSubagent(state, args.task, ctx, args.notifyMain !== false).catch(() => {});
             return { content: [{ type: "text", text: `Subagent #${id} spawned.${args.notifyMain === false ? " Results will be shown in widget only." : ""}` }] };
         },
     });
@@ -956,7 +955,7 @@ export default function (pi: ExtensionAPI) {
             state.textChunks = []; state.elapsed = 0; state.turnCount++;
             updateSubWidgets();
             ctx.ui.notify(`Continuing Subagent #${args.id} (Turn ${state.turnCount})…`, "info");
-            spawnSubagent(state, args.prompt, ctx, args.notifyMain !== false);
+            spawnSubagent(state, args.prompt, ctx, args.notifyMain !== false).catch(() => {});
             return { content: [{ type: "text", text: `Subagent #${args.id} continuing (Turn ${state.turnCount}).` }] };
         },
     });
@@ -1123,7 +1122,9 @@ export default function (pi: ExtensionAPI) {
 
                 // Log: before spawnSubagent
                 fs.appendFileSync(logFile, `[${new Date().toISOString()}] /sub #${id} — before spawnSubagent\n`);
-                spawnSubagent(state, task, ctx);
+                spawnSubagent(state, task, ctx).catch((err: any) => {
+                    fs.appendFileSync(logFile, `[${new Date().toISOString()}] /sub #${id} spawnSubagent rejection: ${err?.message || err}\n`);
+                });
             } catch (err: any) {
                 const logFile = path.join(os.homedir(), ".pi", "agent", "orchestrator-debug.log");
                 fs.appendFileSync(logFile, `[${new Date().toISOString()}] /sub ERROR: ${err?.message || err}\n${err?.stack || ""}\n`);
@@ -1152,7 +1153,7 @@ export default function (pi: ExtensionAPI) {
             state.textChunks = []; state.elapsed = 0; state.turnCount++;
             updateSubWidgets();
             ctx.ui.notify(`Continuing Subagent #${num} (Turn ${state.turnCount})…`, "info");
-            spawnSubagent(state, prompt, ctx);
+            spawnSubagent(state, prompt, ctx).catch(() => {});
         },
     });
 
