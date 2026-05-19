@@ -1,7 +1,7 @@
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { createRequire } from "node:module";
 import { access, readFile, realpath } from "node:fs/promises";
-import { dirname, normalize, resolve } from "node:path";
+import { dirname, join, normalize, resolve } from "node:path";
 
 const PACKAGE_NAME = "@earendil-works/pi-coding-agent";
 const LEGACY_PACKAGE_NAME = "@mariozechner/pi-coding-agent";
@@ -28,6 +28,11 @@ type CommandSpec = {
   command: string;
   args: string[];
   label: string;
+};
+
+type PackageSnapshot = {
+  source: string;
+  version: string;
 };
 
 function shellCommand(label: string): CommandSpec {
@@ -96,21 +101,6 @@ async function detectInstallMethod(pi: ExtensionAPI): Promise<InstallMethod> {
   return "native";
 }
 
-function commandFor(method: InstallMethod): CommandSpec | undefined {
-  switch (method) {
-    case "vp":
-      return shellCommand(`vp add -g ${PACKAGE_NAME}@latest`);
-    case "bun":
-      return shellCommand(`bun add -g ${PACKAGE_NAME}@latest`);
-    case "npm":
-      return shellCommand(`npm install -g ${PACKAGE_NAME}@latest`);
-    case "brew":
-      return shellCommand("brew upgrade pi-coding-agent || brew upgrade pi");
-    case "native":
-      return undefined;
-  }
-}
-
 function isTransient(output: string) {
   return TRANSIENT_PATTERNS.some((pattern) => pattern.test(output));
 }
@@ -118,7 +108,7 @@ function isTransient(output: string) {
 async function runWithRetry(pi: ExtensionAPI, spec: CommandSpec) {
   let lastOutput = "";
   for (let attempt = 1; attempt <= 3; attempt++) {
-    const result = await pi.exec(spec.command, spec.args, { timeout: 180_000 });
+    const result = await pi.exec(spec.command, spec.args, { timeout: 300_000 });
     lastOutput = [result.stdout, result.stderr].filter(Boolean).join("\n").trim();
     if (result.code === 0) return { ok: true, output: lastOutput, attempts: attempt };
     if (attempt === 3 || !isTransient(lastOutput)) return { ok: false, output: lastOutput, attempts: attempt, code: result.code };
@@ -127,41 +117,110 @@ async function runWithRetry(pi: ExtensionAPI, spec: CommandSpec) {
   return { ok: false, output: lastOutput, attempts: 3 };
 }
 
+function stripAnsi(value: string) {
+  return value.replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, "");
+}
+
+async function nearestPackageVersion(path: string): Promise<string> {
+  let dir = stripAnsi(path);
+  for (let i = 0; i < 8; i++) {
+    const packageJson = join(dir, "package.json");
+    if (await pathExists(packageJson)) {
+      try {
+        const json = JSON.parse(await readFile(packageJson, "utf8")) as { version?: string };
+        return json.version || "unknown";
+      } catch {
+        return "unknown";
+      }
+    }
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return "unknown";
+}
+
+async function packageSnapshot(pi: ExtensionAPI): Promise<PackageSnapshot[]> {
+  const spec = shellCommand("pi list");
+  const result = await pi.exec(spec.command, spec.args, { timeout: 30_000 });
+  const lines = result.stdout.split(/\r?\n/);
+  const packages: PackageSnapshot[] = [];
+
+  for (let i = 0; i < lines.length; i++) {
+    const source = stripAnsi(lines[i]).trim();
+    const installedPath = stripAnsi(lines[i + 1] ?? "").trim();
+    if (!source || source.endsWith("packages:") || !installedPath) continue;
+    if (!installedPath.match(/[/\\]/)) continue;
+    packages.push({ source, version: await nearestPackageVersion(installedPath) });
+    i++;
+  }
+
+  return packages;
+}
+
+function formatVersionChange(before: string | undefined, after: string | undefined) {
+  if (!before && after) return after;
+  if (before && !after) return `${before} → removed`;
+  if (before === after) return after ?? "unknown";
+  return `${before ?? "unknown"} → ${after ?? "unknown"}`;
+}
+
+function summarizePackages(before: PackageSnapshot[], after: PackageSnapshot[], output: string) {
+  const beforeBySource = new Map(before.map((pkg) => [pkg.source, pkg.version]));
+  const afterBySource = new Map(after.map((pkg) => [pkg.source, pkg.version]));
+  const updatedSources = new Set<string>();
+
+  for (const rawLine of output.split(/\r?\n/)) {
+    const line = stripAnsi(rawLine).trim();
+    const match = line.match(/^Updated\s+(.+)$/i);
+    if (match && match[1] !== "packages") updatedSources.add(match[1].trim());
+  }
+
+  for (const pkg of after) {
+    if (beforeBySource.get(pkg.source) !== pkg.version) updatedSources.add(pkg.source);
+  }
+
+  return [...updatedSources].sort().map((source) => `- ${source}: ${formatVersionChange(beforeBySource.get(source), afterBySource.get(source))}`);
+}
+
 async function updatePi(pi: ExtensionAPI, ctx: ExtensionCommandContext) {
   await ctx.waitForIdle();
 
   const before = await currentVersion(pi).catch(() => "unknown");
+  const packagesBefore = await packageSnapshot(pi).catch(() => []);
   const method = await detectInstallMethod(pi);
-  const spec = commandFor(method);
+  const spec = shellCommand("pi update");
 
-  if (!spec) {
-    ctx.ui.notify(`Pi ${before}; install method appears native. Please update the native binary manually.`, "warning");
-    return;
-  }
-
-  ctx.ui.notify(`Updating Pi via ${method}: ${spec.label}`, "info");
+  ctx.ui.notify(`Verified Pi install method: ${method}. Running: ${spec.label}`, "info");
   const result = await runWithRetry(pi, spec);
   const after = await currentVersion(pi).catch(() => "unknown");
+  const packagesAfter = await packageSnapshot(pi).catch(() => []);
 
   if (!result.ok) {
-    ctx.ui.notify(`Pi update failed after ${result.attempts} attempt(s)${"code" in result ? ` with exit code ${result.code}` : ""}.\ncommand: ${spec.label}\n${result.output || "No stdout/stderr was captured. Try running this command in a normal terminal."}`, "error");
+    ctx.ui.notify(`Pi update failed after ${result.attempts} attempt(s)${"code" in result ? ` with exit code ${result.code}` : ""}.\n\nInstall method: ${method}\nCommand: ${spec.label}\n\n${result.output || "No stdout/stderr was captured. Try running pi update in a normal terminal."}`, "error");
     return;
   }
 
-  const changed = before !== after && before !== "unknown" && after !== "unknown";
-  const summary = changed ? `Pi updated: ${before} → ${after}` : `Pi is up to date (${after}).`;
-  ctx.ui.notify(`${summary}${result.attempts > 1 ? ` Retried ${result.attempts - 1} transient failure(s).` : ""}`, "info");
+  const piSummary = before !== after && before !== "unknown" && after !== "unknown"
+    ? `Pi updated: ${before} → ${after}`
+    : `Pi is up to date (${after}).`;
+  const packageLines = summarizePackages(packagesBefore, packagesAfter, result.output);
+  const extensionSummary = packageLines.length ? `Extensions updated:\n${packageLines.join("\n")}` : "Extensions are up to date.";
+  const retrySummary = result.attempts > 1 ? `\nRetried ${result.attempts - 1} transient failure(s).` : "";
+  const rawOutput = result.output ? `\n\npi update output:\n${result.output}` : "";
+
+  ctx.ui.notify(`${piSummary}\n${extensionSummary}${retrySummary}${rawOutput}`, "info");
 }
 
 export default function (pi: ExtensionAPI) {
   pi.registerFlag("update", {
-    description: "Update Pi using the detected install method, then report the version change",
+    description: "Run pi update, then report Pi and extension version changes",
     type: "boolean",
     default: false,
   });
 
   pi.registerCommand("update", {
-    description: "Update Pi using vp, bun, npm, brew, or native detection",
+    description: "Verify Pi install method, run pi update, and show Pi/extension update results",
     handler: async (_args, ctx) => {
       await updatePi(pi, ctx);
     },

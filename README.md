@@ -56,7 +56,7 @@ Shortcuts:
 
 ### `pi-update`
 
-Adds an update command and startup flag for updating Pi itself. It detects the install method (`vp`, `bun`, `npm`, `brew`, or native), runs the appropriate update command with retry handling for transient network failures, and reports the version before and after.
+Adds an update command and startup flag. It verifies the detected Pi install method (`vp`, `bun`, `npm`, `brew`, or native), runs `pi update` so Pi and installed packages/extensions are updated together, and reports Pi plus extension version changes. If updating fails, it shows the command, detected install method, exit code, and captured stdout/stderr.
 
 Commands and flags:
 
