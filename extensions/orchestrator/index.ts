@@ -39,6 +39,11 @@ const DEFAULT_MODEL = "openrouter/google/gemini-2.5-flash-preview";
 const GLOBAL_AGENTS_DIR = path.join(os.homedir(), ".pi", "agent", "agents");
 const PREFS_FILE = path.join(os.homedir(), ".pi", "agent", "orchestrator-prefs.json");
 
+/** Resolve the pi executable name ("pi.cmd" on Windows, "pi" elsewhere) */
+function getPiCommand(): string {
+    return process.platform === "win32" ? "pi.cmd" : "pi";
+}
+
 // ── Types ──────────────────────────────────────────────────────────────────────
 
 type OrchestratorMode = "subagent" | "team" | "chain";
@@ -572,7 +577,7 @@ export default function (pi: ExtensionAPI) {
         const model = ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : DEFAULT_MODEL;
 
         return new Promise<void>((resolve) => {
-            const proc = spawn("pi", [
+            const proc = spawn(getPiCommand(), [
                 "--mode", "json", "-p",
                 "--session", state.sessionFile,
                 "--no-extensions",
@@ -693,7 +698,7 @@ export default function (pi: ExtensionAPI) {
 
         const textChunks: string[] = [];
         return new Promise((resolve) => {
-            const proc = spawn("pi", args, { stdio: ["ignore", "pipe", "pipe"], env: { ...process.env } });
+            const proc = spawn(getPiCommand(), args, { stdio: ["ignore", "pipe", "pipe"], env: { ...process.env } });
             let buffer = "";
 
             proc.stdout!.setEncoding("utf-8");
@@ -779,7 +784,7 @@ export default function (pi: ExtensionAPI) {
         const state = stepStates[stepIndex];
 
         return new Promise((resolve) => {
-            const proc = spawn("pi", args, { stdio: ["ignore", "pipe", "pipe"], env: { ...process.env } });
+            const proc = spawn(getPiCommand(), args, { stdio: ["ignore", "pipe", "pipe"], env: { ...process.env } });
             const timer = setInterval(() => { state.elapsed = Date.now() - startTime; updateChainWidget(); }, 1000);
             let buffer = "";
 
