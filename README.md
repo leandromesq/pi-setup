@@ -63,6 +63,25 @@ Commands and flags:
 - `/update` — update Pi using the detected install method.
 - `--update` — queue `/update` automatically at session start.
 
+### `obsidian`
+
+Adds Obsidian vault note-taking tools and `/ob-*` commands for creating, searching, opening, editing, appending, templating, deleting, and capture-mode note taking. Notes are formatted in Brazilian Portuguese, preserve the user's wording as much as possible, support CS-friendly Markdown structures like code fences and LaTeX math, and require confirmation before deletion.
+
+Config:
+
+- `~/.pi/obsidian.json` — stores `vaultPath`, `vaultName`, `templatesDir`, `defaultNotesDir`, and `language`.
+
+Commands:
+
+- `/ob-config` — show or update Obsidian config.
+- `/ob-new <title>` — create a general note with date/time metadata.
+- `/ob-lesson <title>` — create a lesson note with matéria and professor fields.
+- `/ob-open [term]` — search/select and open a note in Obsidian.
+- `/ob-search <term>` — search notes by filename and contents.
+- `/ob-delete [term]` — search/select/delete a note after confirmation.
+- `/ob-capture-start <title>` — start plain-text capture mode into a new note.
+- `/ob-capture-stop` — stop capture mode.
+
 ### `pwsh-user-bash`
 
 Replaces Pi's user `!` shell backend with PowerShell 7 on Windows-oriented setups. It runs `pwsh` directly, avoids the local Git Bash wrapper, keeps startup non-interactive, and optionally sources a dedicated Pi profile before each command.
