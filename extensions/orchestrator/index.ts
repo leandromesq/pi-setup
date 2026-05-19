@@ -44,6 +44,13 @@ function getPiCommand(): string {
     return process.platform === "win32" ? "pi.cmd" : "pi";
 }
 
+/** Spawn options shared by all subprocess calls */
+function getSpawnOptions(): any {
+    const opts: any = { stdio: ["ignore", "pipe", "pipe"], env: { ...process.env } };
+    if (process.platform === "win32") opts.shell = true;
+    return opts;
+}
+
 // ── Types ──────────────────────────────────────────────────────────────────────
 
 type OrchestratorMode = "subagent" | "team" | "chain";
@@ -585,7 +592,7 @@ export default function (pi: ExtensionAPI) {
                 "--tools", "read,bash,grep,find,ls",
                 "--thinking", "off",
                 prompt,
-            ], { stdio: ["ignore", "pipe", "pipe"], env: { ...process.env } });
+            ], getSpawnOptions());
 
             // Register error listener FIRST — before any state mutation.
             // On Windows, spawn can fail synchronously; without a listener
@@ -702,7 +709,7 @@ export default function (pi: ExtensionAPI) {
 
         const textChunks: string[] = [];
         return new Promise((resolve) => {
-            const proc = spawn(getPiCommand(), args, { stdio: ["ignore", "pipe", "pipe"], env: { ...process.env } });
+            const proc = spawn(getPiCommand(), args, getSpawnOptions());
 
             // Register error listener FIRST — before any state reads/writes
             proc.on("error", (err: any) => {
@@ -790,7 +797,7 @@ export default function (pi: ExtensionAPI) {
         const state = stepStates[stepIndex];
 
         return new Promise((resolve) => {
-            const proc = spawn(getPiCommand(), args, { stdio: ["ignore", "pipe", "pipe"], env: { ...process.env } });
+            const proc = spawn(getPiCommand(), args, getSpawnOptions());
 
             // Register error listener FIRST — before any state reads/writes
             let timer: ReturnType<typeof setInterval> | null = null;
