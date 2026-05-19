@@ -74,12 +74,18 @@ Config:
 Commands:
 
 - `/ob-config` — show or update Obsidian config.
+- `/ob-config test` — validate the configured vault/templates.
 - `/ob-new <title>` — create a general note with date/time metadata.
 - `/ob-lesson <title>` — create a lesson note with matéria and professor fields.
 - `/ob-open [term]` — search/select and open a note in Obsidian.
 - `/ob-search <term>` — search notes by filename and contents.
 - `/ob-delete [term]` — search/select/delete a note after confirmation.
-- `/ob-capture-start <title>` — start plain-text capture mode into a new note.
+- `/ob-capture-start <title>` — start raw capture mode into a new note; non-command messages append directly.
+- `/ob-capture-ai-start <title>` — start AI-formatted capture mode into a new note.
+- `/ob-capture-file [term]` — search/select an existing note and start raw capture into it.
+- `/ob-capture-ai-file [term]` — search/select an existing note and start AI-formatted capture into it.
+- `/ob-format [term]` — format/improve an existing note's Markdown while preserving content.
+- `/ob-format-current` — format/improve the active or most recently captured note.
 - `/ob-capture-stop` — stop capture mode.
 
 ### `pwsh-user-bash`

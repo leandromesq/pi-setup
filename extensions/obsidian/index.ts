@@ -1,5 +1,5 @@
-import { existsSync, readFileSync } from "node:fs";
-import { mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { existsSync, readFileSync, statSync } from "node:fs";
+import { appendFile, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { basename, dirname, extname, join, relative, resolve, sep } from "node:path";
 import { homedir } from "node:os";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -158,7 +158,8 @@ async function searchNotes(config: ObsidianConfig, term: string, limit = 20): Pr
     const lowerText = text.toLowerCase();
     let score = 0;
     for (const t of terms) {
-      if (lowerRel.includes(t)) score += 10;
+      if (basename(lowerRel, ".md") === t) score += 100;
+      if (lowerRel.includes(t)) score += 15;
       if (lowerText.includes(t)) score += 3;
     }
     if (terms.length === 0 || score > 0) {
@@ -183,7 +184,7 @@ async function pickSearchResult(ctx: ExtensionContext, config: ObsidianConfig, t
   const results = await searchNotes(config, term);
   if (results.length === 0) return undefined;
   if (!ctx.hasUI) return results[0];
-  const labels = results.map(r => `${r.path}${r.snippet ? ` — ${r.snippet}` : ""}`);
+  const labels = results.map(r => `${r.title} — ${r.path}${r.snippet ? ` — ${r.snippet.slice(0, 90)}` : ""}`);
   const picked = await ctx.ui.select("Escolha uma nota:", labels);
   if (!picked) return undefined;
   return results[labels.indexOf(picked)];
@@ -193,18 +194,31 @@ function renderConfig(config: ObsidianConfig) {
   return `Obsidian config (${CONFIG_PATH})\n- vaultPath: ${config.vaultPath || "(não configurado)"}\n- vaultName: ${config.vaultName || "(derivado da pasta)"}\n- templatesDir: ${config.templatesDir}\n- defaultNotesDir: ${config.defaultNotesDir || "(raiz do vault)"}\n- language: ${config.language}`;
 }
 
+function formatNoteInstruction(path: string, title: string) {
+  return `${FORMAT_INSTRUCTIONS}\n\nFormate e melhore a estrutura Markdown da nota Obsidian abaixo, preservando todo o conteúdo e as palavras originais ao máximo.\n\nRegras específicas para esta tarefa:\n- Leia a nota com obsidian_read_note.\n- Reescreva a nota completa com obsidian_edit_note.\n- Não resuma, não comprima ideias, não remova conteúdo e não extraia TODOs.\n- Corrija apenas estrutura, espaçamento, headings, listas, blocos de código, LaTeX e callouts quando fizer sentido.\n- Mantenha metadados existentes como Data, Hora, Matéria e Professor(a).\n\nNota: ${path}\nTítulo: ${title}`;
+}
+
 export default function obsidianExtension(pi: ExtensionAPI) {
   let config = loadConfig();
-  let capture: { path: string; title: string } | undefined;
+  let capture: { path: string; title: string; mode: "raw" | "ai" } | undefined;
+  let lastCapture: { path: string; title: string } | undefined;
 
   pi.on("before_agent_start", (event) => ({
-    systemPrompt: `${event.systemPrompt}\n\n${FORMAT_INSTRUCTIONS}\nWhen using Obsidian tools, never delete notes unless the user explicitly asked. Use obsidian_search_notes when the user does not know the exact filename.`,
+    systemPrompt: `${event.systemPrompt}\n\n${FORMAT_INSTRUCTIONS}\nWhen using Obsidian tools, never delete notes unless the user explicitly asked. Use obsidian_search_notes when the user does not know the exact filename. Prefer obsidian_append_note for adding content; use obsidian_edit_note only when the user explicitly asks to replace the whole note.`,
   }));
 
-  pi.on("input", (event) => {
+  pi.on("input", async (event, ctx) => {
     if (!capture || event.source === "extension") return { action: "continue" as const };
     const text = event.text.trim();
     if (!text || text.startsWith("/")) return { action: "continue" as const };
+    if (capture.mode === "raw") {
+      const abs = resolveVaultPath(config, capture.path);
+      await withFileMutationQueue(abs, async () => {
+        await appendFile(abs, `\n\n${event.text.trim()}\n`, "utf8");
+      });
+      ctx.ui.notify(`Capturado em: ${capture.path}`, "success");
+      return { action: "handled" as const };
+    }
     return {
       action: "transform" as const,
       text: `${FORMAT_INSTRUCTIONS}\n\nFormate o conteúdo bruto abaixo e acrescente na nota ativa do Obsidian usando obsidian_append_note.\nNota ativa: ${capture.path}\nTítulo: ${capture.title}\n\nConteúdo bruto:\n${event.text}`,
@@ -212,15 +226,34 @@ export default function obsidianExtension(pi: ExtensionAPI) {
   });
 
   pi.registerCommand("ob-config", {
-    description: "Configure Obsidian: /ob-config, /ob-config vault <path>, /ob-config name <vault>, /ob-config templates <dir>, /ob-config notes-dir <dir>",
+    description: "Configure Obsidian: /ob-config, /ob-config test, /ob-config vault <path>, /ob-config name <vault>, /ob-config templates <dir>, /ob-config notes-dir <dir>",
     handler: async (args, ctx) => {
       const input = args.trim();
       if (!input) { ctx.ui.notify(renderConfig(config), "info"); return; }
+      if (input === "test") {
+        try {
+          assertConfigured(config);
+          const vaultOk = existsSync(config.vaultPath) && statSync(config.vaultPath).isDirectory();
+          const templatesPath = config.templatesDir ? resolveVaultPath(config, config.templatesDir) : "";
+          const templatesOk = !templatesPath || existsSync(templatesPath);
+          ctx.ui.notify(`Teste Obsidian:\n- vault: ${vaultOk ? "ok" : "não encontrado"} (${config.vaultPath})\n- templates: ${templatesOk ? "ok" : "não encontrado"} (${config.templatesDir || "desativado"})\n- nome do vault: ${config.vaultName || basename(config.vaultPath)}`, vaultOk ? "success" : "warning");
+        } catch (error) {
+          ctx.ui.notify(error instanceof Error ? error.message : String(error), "error");
+        }
+        return;
+      }
       const match = input.match(/^(vault|name|templates|notes-dir)\s+([\s\S]+)$/i);
-      if (!match) { ctx.ui.notify("Usage: /ob-config vault <path> | name <vault> | templates <dir> | notes-dir <dir>", "warning"); return; }
+      if (!match) { ctx.ui.notify("Usage: /ob-config vault <path> | name <vault> | templates <dir> | notes-dir <dir> | test", "warning"); return; }
       const key = match[1].toLowerCase();
       const value = match[2].replace(/^['\"]|['\"]$/g, "").trim();
-      if (key === "vault") config.vaultPath = resolve(value);
+      if (key === "vault") {
+        const vaultPath = resolve(value);
+        if (!existsSync(vaultPath) || !statSync(vaultPath).isDirectory()) {
+          ctx.ui.notify(`Vault não encontrado ou não é pasta: ${vaultPath}`, "warning");
+          return;
+        }
+        config.vaultPath = vaultPath;
+      }
       if (key === "name") config.vaultName = value;
       if (key === "templates") config.templatesDir = value;
       if (key === "notes-dir") config.defaultNotesDir = value;
@@ -237,7 +270,8 @@ export default function obsidianExtension(pi: ExtensionAPI) {
       const path = notePathFor(config, title);
       await mkdir(dirname(path), { recursive: true });
       await writeFile(path, baseNote(title), "utf8");
-      ctx.ui.notify(`Nota criada: ${vaultRelative(config, path)}`, "success");
+      const rel = vaultRelative(config, path);
+      ctx.ui.notify(`Nota criada: ${rel}\nUse /ob-open ${title} para abrir ou /ob-capture-start ${title} para capturar.`, "success");
     },
   });
 
@@ -303,9 +337,72 @@ export default function obsidianExtension(pi: ExtensionAPI) {
       const path = notePathFor(config, title);
       await mkdir(dirname(path), { recursive: true });
       await writeFile(path, baseNote(title), "utf8");
-      capture = { path: vaultRelative(config, path), title };
-      ctx.ui.setStatus("obsidian-capture", `ob: ${title}`);
-      ctx.ui.notify(`Capture mode ativo: ${capture.path}`, "success");
+      capture = { path: vaultRelative(config, path), title, mode: "raw" };
+      lastCapture = { path: capture.path, title };
+      ctx.ui.setStatus("obsidian-capture", `CAPTURANDO OB: ${title} · /ob-capture-stop`);
+      ctx.ui.notify(`Capture mode ativo (raw): ${capture.path}\nMensagens sem / serão anexadas diretamente.`, "success");
+    },
+  });
+
+  pi.registerCommand("ob-capture-ai-start", {
+    description: "Start AI-formatted Obsidian capture mode into a new note: /ob-capture-ai-start <title>",
+    handler: async (args, ctx) => {
+      const title = args.trim();
+      if (!title) { ctx.ui.notify("Usage: /ob-capture-ai-start <title>", "warning"); return; }
+      const path = notePathFor(config, title);
+      await mkdir(dirname(path), { recursive: true });
+      await writeFile(path, baseNote(title), "utf8");
+      capture = { path: vaultRelative(config, path), title, mode: "ai" };
+      lastCapture = { path: capture.path, title };
+      ctx.ui.setStatus("obsidian-capture", `CAPTURANDO OB+AI: ${title} · /ob-capture-stop`);
+      ctx.ui.notify(`Capture mode ativo (AI): ${capture.path}\nMensagens sem / serão formatadas pelo modelo e anexadas.`, "success");
+    },
+  });
+
+  pi.registerCommand("ob-capture-file", {
+    description: "Start raw Obsidian capture mode into an existing note: /ob-capture-file [term]",
+    handler: async (args, ctx) => {
+      const term = args.trim() || (ctx.hasUI ? (await ctx.ui.input("Buscar nota para capturar:", "")) ?? "" : "");
+      const picked = await pickSearchResult(ctx, config, term);
+      if (!picked) { ctx.ui.notify("Nenhuma nota encontrada.", "warning"); return; }
+      capture = { path: picked.path, title: picked.title, mode: "raw" };
+      lastCapture = { path: picked.path, title: picked.title };
+      ctx.ui.setStatus("obsidian-capture", `CAPTURANDO OB: ${picked.title} · /ob-capture-stop`);
+      ctx.ui.notify(`Capture mode ativo (raw): ${picked.path}\nMensagens sem / serão anexadas diretamente.`, "success");
+    },
+  });
+
+  pi.registerCommand("ob-capture-ai-file", {
+    description: "Start AI-formatted Obsidian capture mode into an existing note: /ob-capture-ai-file [term]",
+    handler: async (args, ctx) => {
+      const term = args.trim() || (ctx.hasUI ? (await ctx.ui.input("Buscar nota para capturar com AI:", "")) ?? "" : "");
+      const picked = await pickSearchResult(ctx, config, term);
+      if (!picked) { ctx.ui.notify("Nenhuma nota encontrada.", "warning"); return; }
+      capture = { path: picked.path, title: picked.title, mode: "ai" };
+      lastCapture = { path: picked.path, title: picked.title };
+      ctx.ui.setStatus("obsidian-capture", `CAPTURANDO OB+AI: ${picked.title} · /ob-capture-stop`);
+      ctx.ui.notify(`Capture mode ativo (AI): ${picked.path}\nMensagens sem / serão formatadas pelo modelo e anexadas.`, "success");
+    },
+  });
+
+  pi.registerCommand("ob-format", {
+    description: "Format/improve an existing Obsidian note while preserving content: /ob-format [term]",
+    handler: async (args, ctx) => {
+      const term = args.trim() || (ctx.hasUI ? (await ctx.ui.input("Buscar nota para formatar:", "")) ?? "" : "");
+      const picked = await pickSearchResult(ctx, config, term);
+      if (!picked) { ctx.ui.notify("Nenhuma nota encontrada.", "warning"); return; }
+      pi.sendUserMessage(formatNoteInstruction(picked.path, picked.title), { deliverAs: "followUp" });
+      ctx.ui.notify(`Formatação enfileirada: ${picked.path}`, "success");
+    },
+  });
+
+  pi.registerCommand("ob-format-current", {
+    description: "Format/improve the active or last captured Obsidian note while preserving content",
+    handler: async (_args, ctx) => {
+      const target = capture ?? lastCapture;
+      if (!target) { ctx.ui.notify("Nenhuma nota de captura ativa ou recente. Use /ob-format [term].", "warning"); return; }
+      pi.sendUserMessage(formatNoteInstruction(target.path, target.title), { deliverAs: "followUp" });
+      ctx.ui.notify(`Formatação enfileirada: ${target.path}`, "success");
     },
   });
 
@@ -409,7 +506,7 @@ export default function obsidianExtension(pi: ExtensionAPI) {
   pi.registerTool({
     name: "obsidian_apply_template",
     label: "Obsidian Apply Template",
-    description: "Apply a vault-relative Markdown template file using {{title}}, {{date}}, {{time}}, {{subject}}, {{professor}}, and {{content}} placeholders.",
+    description: "Render a vault-relative Markdown template using {{title}}, {{date}}, {{time}}, {{subject}}, {{professor}}, and {{content}} placeholders.",
     parameters: Type.Object({ templatePath: Type.String(), title: Type.String(), content: Type.Optional(Type.String()), subject: Type.Optional(Type.String()), professor: Type.Optional(Type.String()) }),
     async execute(_id, params) {
       const { date, time } = nowParts();
@@ -422,6 +519,32 @@ export default function obsidianExtension(pi: ExtensionAPI) {
         content: params.content ?? "",
       });
       return { content: [{ type: "text", text }], details: { templatePath: params.templatePath } };
+    },
+  });
+
+  pi.registerTool({
+    name: "obsidian_create_from_template",
+    label: "Obsidian Create From Template",
+    description: "Create a markdown note from a vault-relative template file.",
+    promptGuidelines: ["Use this when the user asks to create a note using an Obsidian template."],
+    parameters: Type.Object({ templatePath: Type.String(), title: Type.String(), content: Type.Optional(Type.String()), subject: Type.Optional(Type.String()), professor: Type.Optional(Type.String()) }),
+    async execute(_id, params) {
+      const { date, time } = nowParts();
+      const text = await renderTemplateNote(config, params.templatePath, {
+        title: params.title,
+        date,
+        time,
+        subject: params.subject ?? "",
+        professor: params.professor ?? "",
+        content: params.content ?? "",
+      });
+      const path = notePathFor(config, params.title);
+      return withFileMutationQueue(path, async () => {
+        await mkdir(dirname(path), { recursive: true });
+        await writeFile(path, text, "utf8");
+        const rel = vaultRelative(config, path);
+        return { content: [{ type: "text", text: `Created Obsidian note from template: ${rel}` }], details: { path: rel, templatePath: params.templatePath } };
+      });
     },
   });
 
