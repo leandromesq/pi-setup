@@ -32,7 +32,6 @@ const { spawn } = require("child_process") as any;
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { applyExtensionDefaults } from "../themeMap.ts";
 
 // ── Constants ──────────────────────────────────────────────────────────────────
 
@@ -326,8 +325,13 @@ export default function (pi: ExtensionAPI) {
     // ── Team widget ───────────────────────────────────────────────────────────
 
     function renderTeamCard(state: AgentState, colWidth: number, theme: any): string[] {
-        const w = colWidth - 2;
-        const trunc = (s: string, max: number) => s.length > max ? s.slice(0, max - 3) + "..." : s;
+        const w = Math.max(1, colWidth - 2);
+        const trunc = (s: string, max: number) => {
+            if (max <= 0) return "";
+            if (s.length <= max) return s;
+            if (max <= 3) return s.slice(0, max);
+            return s.slice(0, max - 3) + "...";
+        };
 
         const sc = state.status === "idle" ? "dim" : state.status === "running" ? "accent"
             : state.status === "done" ? "success" : "error";
@@ -343,9 +347,10 @@ export default function (pi: ExtensionAPI) {
         const statusLine = theme.fg(sc, statusStr + timeStr);
         const statusVis = statusStr.length + timeStr.length;
 
-        const filled = Math.ceil(state.contextPct / 20);
-        const barColor = state.contextPct > 80 ? "error" : state.contextPct > 50 ? "warning" : "success";
-        const barStr = theme.fg(barColor, "#".repeat(filled)) + theme.fg("dim", "-".repeat(5 - filled)) + ` ${Math.ceil(state.contextPct)}%`;
+        const contextPct = Math.max(0, Math.min(100, Number.isFinite(state.contextPct) ? state.contextPct : 0));
+        const filled = Math.max(0, Math.min(5, Math.ceil(contextPct / 20)));
+        const barColor = contextPct > 80 ? "error" : contextPct > 50 ? "warning" : "success";
+        const barStr = theme.fg(barColor, "#".repeat(filled)) + theme.fg("dim", "-".repeat(5 - filled)) + ` ${Math.ceil(contextPct)}%`;
         const ctxLine = barStr;
 
         // Idle: show description in a distinct color. Running/done: show last work output
@@ -353,7 +358,7 @@ export default function (pi: ExtensionAPI) {
             : state.task ? state.task
             : state.def.description;
         const workText = trunc(workRaw, Math.min(50, w - 1));
-        const workColor = state.status === "idle" ? "info" : state.status === "running" ? "accent" : "muted";
+        const workColor = state.status === "idle" ? "dim" : state.status === "running" ? "accent" : "muted";
         const workLine = theme.fg(workColor, workText);
 
         // Border color matches status for visual pop
@@ -383,8 +388,8 @@ export default function (pi: ExtensionAPI) {
                         text.setText(theme.fg("dim", "No agents loaded. Add .md files to ~/.pi/agent/agents/ or .pi/agents/"));
                         return text.render(width);
                     }
-                    const cols = Math.min(gridCols, agentStates.size);
-                    const colWidth = Math.floor((width - (cols - 1)) / cols);
+                    const cols = Math.max(1, Math.min(gridCols, agentStates.size));
+                    const colWidth = Math.max(3, Math.floor((Math.max(1, width) - (cols - 1)) / cols));
                     const arr = Array.from(agentStates.values());
                     const rows: string[][] = [];
 
@@ -406,8 +411,13 @@ export default function (pi: ExtensionAPI) {
     // ── Chain widget ──────────────────────────────────────────────────────────
 
     function renderChainCard(state: StepState, colWidth: number, theme: any): string[] {
-        const w = colWidth - 2;
-        const trunc = (s: string, max: number) => s.length > max ? s.slice(0, max - 3) + "..." : s;
+        const w = Math.max(1, colWidth - 2);
+        const trunc = (s: string, max: number) => {
+            if (max <= 0) return "";
+            if (s.length <= max) return s;
+            if (max <= 3) return s.slice(0, max);
+            return s.slice(0, max - 3) + "...";
+        };
 
         const sc = state.status === "pending" ? "dim" : state.status === "running" ? "accent"
             : state.status === "done" ? "success" : "error";
@@ -478,31 +488,17 @@ export default function (pi: ExtensionAPI) {
         });
     }
 
-    // ── Footer ────────────────────────────────────────────────────────────────
+    // ── Footer metadata ───────────────────────────────────────────────────────
 
     function updateFooter(ctx: any) {
         if (!ctx) return;
-        ctx.ui.setFooter((_tui: any, theme: any) => ({
-            dispose: () => {},
-            invalidate() {},
-            render(width: number): string[] {
-                const model = ctx.model?.id || "no-model";
-                const usage = ctx.getContextUsage?.();
-                const pct = usage?.percent ?? 0;
-                const filled = Math.round(pct / 10);
-                const bar = "#".repeat(filled) + "-".repeat(10 - filled);
+        let modeLabel: string;
+        if (mode === "team") modeLabel = `team:${activeTeamName || "no-team"}`;
+        else if (mode === "chain") modeLabel = `chain:${activeChain?.name || "no-chain"}`;
+        else modeLabel = "subagent";
 
-                let modeLabel: string;
-                if (mode === "team")        modeLabel = theme.fg("accent", `team:${activeTeamName || "no-team"}`);
-                else if (mode === "chain")  modeLabel = theme.fg("accent", `chain:${activeChain?.name || "no-chain"}`);
-                else                        modeLabel = theme.fg("accent", "subagent");
-
-                const left = theme.fg("dim", ` ${model}`) + theme.fg("muted", " · ") + modeLabel;
-                const right = theme.fg("dim", `[${bar}] ${Math.round(pct)}% `);
-                const pad = " ".repeat(Math.max(1, width - visibleWidth(left) - visibleWidth(right)));
-                return [truncateToWidth(left + pad + right, width)];
-            },
-        }));
+        (globalThis as any).__piOrchestratorModeTitle = modeLabel;
+        ctx.ui.requestRender?.();
     }
 
     // ── Data loaders ──────────────────────────────────────────────────────────
@@ -1081,28 +1077,21 @@ export default function (pi: ExtensionAPI) {
     // ── Commands ──────────────────────────────────────────────────────────────
 
     pi.registerCommand("mode", {
-        description: "View or switch orchestration mode: /mode [subagent|team|chain]",
-        getArgumentCompletions: (): AutocompleteItem[] | null => [
-            { value: "subagent", label: "subagent — free-form background subagents" },
-            { value: "team",     label: "team     — dispatcher with specialist agent grid" },
-            { value: "chain",    label: "chain    — sequential pipeline (A → B → C)" },
-        ],
+        description: "Select orchestration mode",
         handler: async (args, ctx) => {
             widgetCtx = ctx;
-            const newMode = args?.trim();
+            let newMode = args?.trim();
 
             if (!newMode) {
-                const subInfo = `  ${agents.size} active subagent(s)`;
-                const teamInfo = `  ${activeTeamName ? `Active: ${activeTeamName} (${agentStates.size} agents)` : `${Object.keys(teams).length} teams loaded`}`;
-                const chainInfo = `  ${activeChain ? `Active: ${activeChain.name} (${activeChain.steps.length} steps)` : `${chains.length} chains loaded`}`;
-                ctx.ui.notify(
-                    `Current mode: ${mode}\n\n` +
-                    `subagent${mode === "subagent" ? " ◀" : ""}\n${subInfo}\n\n` +
-                    `team${mode === "team" ? " ◀" : ""}\n${teamInfo}\n\n` +
-                    `chain${mode === "chain" ? " ◀" : ""}\n${chainInfo}`,
-                    "info"
-                );
-                return;
+                const modeValues: OrchestratorMode[] = ["subagent", "team", "chain"];
+                const optionLabels = modeValues.map(value => {
+                    if (value === "subagent") return `subagent${mode === value ? " ◀ current" : ""} — free-form background subagents (${agents.size} active)`;
+                    if (value === "team") return `team${mode === value ? " ◀ current" : ""} — dispatcher with specialist agent grid (${activeTeamName || Object.keys(teams).length + " teams"})`;
+                    return `chain${mode === value ? " ◀ current" : ""} — sequential pipeline (${activeChain?.name || chains.length + " chains"})`;
+                });
+                const choice = await ctx.ui.select("Select Orchestration Mode", optionLabels);
+                if (choice === undefined) return;
+                newMode = modeValues[optionLabels.indexOf(choice)];
             }
 
             if (!["subagent", "team", "chain"].includes(newMode)) {
@@ -1397,7 +1386,6 @@ ${catalog}
     // ── session_start ─────────────────────────────────────────────────────────
 
     pi.on("session_start", async (_event, ctx) => {
-        applyExtensionDefaults(import.meta.url, ctx);
         widgetCtx = ctx;
         contextWindow = (ctx as any).model?.contextWindow || 0;
         const discoveredBaseTools = pi.getActiveTools().filter(name => !orchestratorToolNames.has(name));

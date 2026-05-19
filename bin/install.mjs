@@ -28,6 +28,7 @@ for (const pkg of ['npm:pi-hermes-memory', 'npm:pi-extmgr', source]) {
   if (!settings.packages.includes(pkg)) settings.packages.push(pkg);
 }
 settings.retry = settings.retry ?? { enabled: true };
+settings.theme = settings.theme ?? 'github-dark-default';
 await writeJson(settingsPath, settings);
 
 console.log(`Updated ${settingsPath}`);

@@ -41,6 +41,10 @@ Commands:
 
 - `/git <target-branch>` — plan commits, push, and create a GitHub PR against the target branch.
 
+### `orchestrator`
+
+Adds `/mode` for selecting the active orchestration mode (`subagent`, `team`, or `chain`) from a picker, plus subagent/team/chain commands and tools.
+
 ### `pi-ui`
 
 Installs a custom Pi terminal UI with a Pi header, shortcut hints, model/provider/thinking display, path and git branch status, context usage meter, custom editor border colors, fixed editor layout support, and a working-duration indicator. It also adds an editor text stash shortcut.

@@ -23,7 +23,6 @@
     "extensions": [
       "./extensions/favs/index.ts",
       "./extensions/git-pr/index.ts",
-      "./extensions/pi-ui/index.ts",
       "./extensions/pi-update/index.ts",
       "./extensions/pwsh-user-bash/index.ts",
       "./extensions/scratchpad/index.ts",
@@ -31,7 +30,8 @@
       "./extensions/diff/index.ts",
       "./extensions/zed/index.ts",
       "./extensions/obsidian/index.ts",
-      "./extensions/orchestrator/index.ts"
+      "./extensions/orchestrator/index.ts",
+      "./extensions/pi-ui/index.ts"
     ],
     "themes": [
       "./themes/github-dark-default.json"
