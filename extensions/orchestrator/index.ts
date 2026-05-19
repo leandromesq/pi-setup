@@ -274,14 +274,16 @@ export default function (pi: ExtensionAPI) {
     function updateSubWidgets() {
         if (!widgetCtx) return;
         for (const [id, state] of Array.from(agents.entries())) {
-            widgetCtx.ui.setWidget(`sub-${id}`, (_tui: any, theme: any) => {
-                const container = new Container();
-                const borderFn = (s: string) => theme.fg("dim", s);
-                container.addChild(new Text("", 0, 0));
-                container.addChild(new DynamicBorder(borderFn));
-                const content = new Text("", 1, 0);
-                container.addChild(content);
-                container.addChild(new DynamicBorder(borderFn));
+            try {
+                widgetCtx.ui.setWidget(`sub-${id}`, (_tui: any, theme: any) => {
+                    try {
+                        const container = new Container();
+                        const borderFn = (s: string) => theme.fg("dim", s);
+                        container.addChild(new Text("", 0, 0));
+                        container.addChild(new DynamicBorder(borderFn));
+                        const content = new Text("", 1, 0);
+                        container.addChild(content);
+                        container.addChild(new DynamicBorder(borderFn));
 
                 return {
                     render(width: number): string[] {
@@ -309,7 +311,15 @@ export default function (pi: ExtensionAPI) {
                     },
                     invalidate() { container.invalidate(); },
                 };
+            } catch (innerErr: any) {
+                const logFile = path.join(os.homedir(), ".pi", "agent", "orchestrator-debug.log");
+                fs.appendFileSync(logFile, `[${new Date().toISOString()}] updateSubWidgets widget factory error #${id}: ${innerErr?.message || innerErr}\n`);
+            }
             });
+            } catch (outerErr: any) {
+                const logFile = path.join(os.homedir(), ".pi", "agent", "orchestrator-debug.log");
+                fs.appendFileSync(logFile, `[${new Date().toISOString()}] updateSubWidgets setWidget error #${id}: ${outerErr?.message || outerErr}\n`);
+            }
         }
     }
 
@@ -1091,18 +1101,34 @@ export default function (pi: ExtensionAPI) {
     pi.registerCommand("sub", {
         description: "Spawn a background subagent: /sub <task>",
         handler: async (args, ctx) => {
-            widgetCtx = ctx;
-            const task = args?.trim();
-            if (!task) { ctx.ui.notify("Usage: /sub <task>", "error"); return; }
+            try {
+                widgetCtx = ctx;
+                const task = args?.trim();
+                if (!task) { ctx.ui.notify("Usage: /sub <task>", "error"); return; }
 
-            const id = nextId++;
-            const state: SubState = {
-                id, status: "running", task, textChunks: [], toolCount: 0,
-                elapsed: 0, sessionFile: makeSubagentSessionFile(id), turnCount: 1,
-            };
-            agents.set(id, state);
-            updateSubWidgets();
-            spawnSubagent(state, task, ctx);
+                // Log: before session file creation
+                const logFile = path.join(os.homedir(), ".pi", "agent", "orchestrator-debug.log");
+                fs.appendFileSync(logFile, `[${new Date().toISOString()}] /sub "${task}" — creating session file\n`);
+
+                const id = nextId++;
+                const state: SubState = {
+                    id, status: "running", task, textChunks: [], toolCount: 0,
+                    elapsed: 0, sessionFile: makeSubagentSessionFile(id), turnCount: 1,
+                };
+                agents.set(id, state);
+
+                // Log: before updateSubWidgets
+                fs.appendFileSync(logFile, `[${new Date().toISOString()}] /sub #${id} — before updateSubWidgets\n`);
+                updateSubWidgets();
+
+                // Log: before spawnSubagent
+                fs.appendFileSync(logFile, `[${new Date().toISOString()}] /sub #${id} — before spawnSubagent\n`);
+                spawnSubagent(state, task, ctx);
+            } catch (err: any) {
+                const logFile = path.join(os.homedir(), ".pi", "agent", "orchestrator-debug.log");
+                fs.appendFileSync(logFile, `[${new Date().toISOString()}] /sub ERROR: ${err?.message || err}\n${err?.stack || ""}\n`);
+                ctx.ui.notify(`Subagent error: ${err?.message || err}`, "error");
+            }
         },
     });
 
