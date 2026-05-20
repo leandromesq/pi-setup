@@ -13,13 +13,13 @@
  *     Agent .md files: ~/.pi/agent/agents/  or  agents/  .claude/agents/  .pi/agents/  in cwd
  *     Teams: ~/.pi/agent/agents/teams.yaml  (merged with .pi/agents/teams.yaml per project)
  *     Tool: dispatch_agent
- *     Commands: /agents-team  /agents-list  /agents-grid <1-6>
+ *     Commands: /team  /team-list  /agents-grid <1-6>
  *
  *   chain
  *     Sequential pipeline (step A → step B → step C).
  *     Chains: ~/.pi/agent/agents/agent-chain.yaml  (merged with .pi/agents/agent-chain.yaml)
  *     Tool: run_chain  (plus all default tools)
- *     Commands: /chain  /chain-list
+ *     Commands: /chain  /chain-list  /chain-run <task>
  *
  * Mode + active team/chain persists across /new via ~/.pi/agent/orchestrator-prefs.json
  */
@@ -892,8 +892,13 @@ export default function (pi: ExtensionAPI) {
 
     // ── Mode management ───────────────────────────────────────────────────────
 
+    function readSearchTools(): string[] {
+        const allowed = new Set(["read", "grep", "find", "ls", "rg"]);
+        return baseTools.filter(name => allowed.has(name));
+    }
+
     function activeToolsForMode(): string[] {
-        if (mode === "team") return ["dispatch_agent"];
+        if (mode === "team") return Array.from(new Set([...readSearchTools(), "dispatch_agent"]));
         if (mode === "chain") return Array.from(new Set([...baseTools, "run_chain"]));
         return Array.from(new Set([...baseTools, ...subagentToolNames]));
     }
@@ -1082,6 +1087,14 @@ export default function (pi: ExtensionAPI) {
             widgetCtx = ctx;
             let newMode = args?.trim();
 
+            if (newMode === "status") {
+                const subInfo = `${agents.size} subagent(s)`;
+                const teamInfo = activeTeamName ? `${activeTeamName} (${agentStates.size} agents)` : `${Object.keys(teams).length} team(s) loaded`;
+                const chainInfo = activeChain ? `${activeChain.name} (${activeChain.steps.length} steps)` : `${chains.length} chain(s) loaded`;
+                ctx.ui.notify(`Mode: ${mode}\nSubagents: ${subInfo}\nTeam: ${teamInfo}\nChain: ${chainInfo}\nTools: ${activeToolsForMode().join(", ")}`, "info");
+                return;
+            }
+
             if (!newMode) {
                 const modeValues: OrchestratorMode[] = ["subagent", "team", "chain"];
                 const optionLabels = modeValues.map(value => {
@@ -1205,8 +1218,8 @@ export default function (pi: ExtensionAPI) {
 
     // — Team commands —
 
-    pi.registerCommand("agents-team", {
-        description: "Select a team to work with",
+    pi.registerCommand("team", {
+        description: "Select a team and switch to team mode",
         handler: async (_args, ctx) => {
             widgetCtx = ctx;
             const teamNames = Object.keys(teams);
@@ -1223,7 +1236,7 @@ export default function (pi: ExtensionAPI) {
         },
     });
 
-    pi.registerCommand("agents-list", {
+    pi.registerCommand("team-list", {
         description: "List all loaded agents and their status",
         handler: async (_args, ctx) => {
             widgetCtx = ctx;
@@ -1252,7 +1265,7 @@ export default function (pi: ExtensionAPI) {
     // — Chain commands —
 
     pi.registerCommand("chain", {
-        description: "Switch active chain",
+        description: "Select a chain and switch to chain mode",
         handler: async (_args, ctx) => {
             widgetCtx = ctx;
             if (chains.length === 0) { ctx.ui.notify("No chains defined. Add agent-chain.yaml to ~/.pi/agent/agents/ or .pi/agents/", "warning"); return; }
@@ -1284,6 +1297,20 @@ export default function (pi: ExtensionAPI) {
         },
     });
 
+    pi.registerCommand("chain-run", {
+        description: "Run the active chain directly: /chain-run <task>",
+        handler: async (args, ctx) => {
+            widgetCtx = ctx;
+            const task = args?.trim();
+            if (!task) { ctx.ui.notify("Usage: /chain-run <task>", "warning"); return; }
+            if (!activeChain) { ctx.ui.notify("No chain active. Use /chain first.", "warning"); return; }
+            switchMode("chain", ctx);
+            const result = await runChainPipeline(task, ctx);
+            const truncated = result.output.length > 8000 ? result.output.slice(0, 8000) + "\n\n... [truncated]" : result.output;
+            ctx.ui.notify(`[chain:${activeChain.name}] ${result.success ? "done" : "error"} in ${Math.round(result.elapsed / 1000)}s\n\n${truncated}`, result.success ? "success" : "error");
+        },
+    });
+
     // ── before_agent_start ────────────────────────────────────────────────────
 
     pi.on("before_agent_start", async (_event, ctx) => {
@@ -1303,7 +1330,7 @@ export default function (pi: ExtensionAPI) {
 
             return {
                 systemPrompt: `You are a dispatcher agent. You coordinate specialist agents to accomplish tasks.
-You do NOT have direct access to the codebase. You MUST delegate all work through agents using the dispatch_agent tool.
+You have read/search access to inspect context, but implementation work must be delegated through agents using the dispatch_agent tool.
 
 ## Active Team: ${activeTeamName}
 Members: ${members}
@@ -1317,8 +1344,9 @@ You can ONLY dispatch to agents listed below.
 - Summarize the outcome for the user
 
 ## Rules
-- NEVER read, write, or execute code directly — you have no such tools
-- ALWAYS use dispatch_agent to get work done
+- You may use read/search tools for quick context checks
+- Do not write, edit, or execute code directly in team mode
+- Use dispatch_agent for implementation, review, and substantial investigation
 - You can chain agents: scout/planner first, then builder/coder
 - Keep tasks focused — one clear objective per dispatch
 
@@ -1435,10 +1463,10 @@ ${catalog}
 
         ctx.ui.notify(
             `Agent Orchestrator · mode: ${mode}\n\n` +
-            `/mode [subagent|team|chain]\n\n` +
+            `/mode [subagent|team|chain|status]\n\n` +
             `subagent: /sub  /subcont  /subrm  /subclear  /sublist\n` +
-            `team (${teamSummary}): /agents-team  /agents-list  /agents-grid\n` +
-            `chain (${chainSummary}): /chain  /chain-list`,
+            `team (${teamSummary}): /team  /team-list  /agents-grid\n` +
+            `chain (${chainSummary}): /chain  /chain-list  /chain-run`,
             "info"
         );
 

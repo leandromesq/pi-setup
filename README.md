@@ -43,7 +43,19 @@ Commands:
 
 ### `orchestrator`
 
-Adds `/mode` for selecting the active orchestration mode (`subagent`, `team`, or `chain`) from a picker, plus subagent/team/chain commands and tools.
+Adds `/mode` for selecting the active orchestration mode (`subagent`, `team`, or `chain`) from a picker, plus subagent/team/chain commands and tools. `subagent` mode gives the model subagent tools for day-to-day parallel scouting; `team` mode allows read/search plus specialist dispatch; `chain` mode runs repeatable pipelines.
+
+Commands:
+
+- `/mode` — pick an orchestration mode.
+- `/mode status` — show current mode, active team/chain, subagents, and tools.
+- `/sub <task>` — spawn a background subagent.
+- `/team` — select a team and switch to team mode.
+- `/team-list` — list active team agents.
+- `/agents-grid <1-6>` — set team widget columns.
+- `/chain` — select a chain and switch to chain mode.
+- `/chain-list` — list available chains.
+- `/chain-run <task>` — run the active chain directly.
 
 ### `pi-ui`
 
