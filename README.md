@@ -43,7 +43,19 @@ Commands:
 
 ### `orchestrator`
 
-Adds `/mode` for selecting the active orchestration mode (`subagent`, `team`, or `chain`) from a picker, plus subagent/team/chain commands and tools. `subagent` mode gives the model subagent tools for day-to-day parallel scouting; `team` mode allows read/search plus specialist dispatch; `chain` mode runs repeatable pipelines.
+Adds `/mode` for selecting the active orchestration mode (`subagent`, `team`, or `chain`) from a picker, plus subagent/team/chain commands and tools. `subagent` mode gives the model subagent tools for day-to-day parallel scouting; `team` mode allows read/search plus specialist dispatch; `chain` mode runs repeatable pipelines. Team and chain agents may define optional `model` and `thinking` frontmatter fields.
+
+Agent frontmatter:
+
+```yaml
+---
+name: scout
+description: Fast codebase reconnaissance
+tools: read,grep,find,ls
+model: openrouter/google/gemini-2.5-flash
+thinking: off
+---
+```
 
 Commands:
 

@@ -78,6 +78,8 @@ interface AgentDef {
     description: string;
     tools: string;
     systemPrompt: string;
+    model?: string;
+    thinking?: string;
     file?: string;
 }
 
@@ -151,6 +153,8 @@ function parseAgentFile(filePath: string): AgentDef | null {
             description: fm.description || "",
             tools: fm.tools || "read,grep,find,ls",
             systemPrompt: match[2].trim(),
+            model: fm.model || undefined,
+            thinking: fm.thinking || undefined,
             file: filePath,
         };
     } catch { return null; }
@@ -581,10 +585,20 @@ export default function (pi: ExtensionAPI) {
         if (!pendingReset) updateChainWidget();
     }
 
+    // ── Model helpers ────────────────────────────────────────────────────────
+
+    function modelFor(ctx: any, agentDef?: AgentDef): string {
+        return agentDef?.model || (ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : DEFAULT_MODEL);
+    }
+
+    function thinkingFor(agentDef?: AgentDef): string {
+        return agentDef?.thinking || "off";
+    }
+
     // ── Subagent spawner ──────────────────────────────────────────────────────
 
     function spawnSubagent(state: SubState, prompt: string, ctx: any, notifyMain = true): Promise<void> {
-        const model = ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : DEFAULT_MODEL;
+        const model = modelFor(ctx);
 
         return new Promise<void>((resolve) => {
             const proc = spawn(getPiCommand(), [
@@ -695,7 +709,8 @@ export default function (pi: ExtensionAPI) {
         const startTime = Date.now();
         state.timer = setInterval(() => { state.elapsed = Date.now() - startTime; updateTeamWidget(); }, 1000);
 
-        const model = ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : DEFAULT_MODEL;
+        const model = modelFor(ctx, state.def);
+        const thinking = thinkingFor(state.def);
         const agentKey = state.def.name.toLowerCase().replace(/\s+/g, "-");
         const sessionFile = path.join(teamSessionDir, `${agentKey}.json`);
 
@@ -703,7 +718,7 @@ export default function (pi: ExtensionAPI) {
             "--mode", "json", "-p", "--no-extensions",
             "--model", model,
             "--tools", state.def.tools,
-            "--thinking", "off",
+            "--thinking", thinking,
             "--append-system-prompt", state.def.systemPrompt,
             "--session", sessionFile,
         ];
@@ -779,7 +794,8 @@ export default function (pi: ExtensionAPI) {
     // ── Chain step runner ─────────────────────────────────────────────────────
 
     function runChainAgent(agentDef: AgentDef, task: string, stepIndex: number, ctx: any): Promise<{ output: string; exitCode: number; elapsed: number }> {
-        const model = ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : DEFAULT_MODEL;
+        const model = modelFor(ctx, agentDef);
+        const thinking = thinkingFor(agentDef);
         const agentKey = agentDef.name.toLowerCase().replace(/\s+/g, "-");
         const sessionFile = path.join(chainSessionDir, `chain-${agentKey}.json`);
         const hasSession = agentSessions.get(agentKey);
@@ -788,7 +804,7 @@ export default function (pi: ExtensionAPI) {
             "--mode", "json", "-p", "--no-extensions",
             "--model", model,
             "--tools", agentDef.tools,
-            "--thinking", "off",
+            "--thinking", thinking,
             "--append-system-prompt", agentDef.systemPrompt,
             "--session", sessionFile,
         ];
@@ -1324,7 +1340,7 @@ export default function (pi: ExtensionAPI) {
 
         if (mode === "team") {
             const catalog = Array.from(agentStates.values())
-                .map(s => `### ${displayName(s.def.name)}\n**Dispatch as:** \`${s.def.name}\`\n${s.def.description}\n**Tools:** ${s.def.tools}`)
+                .map(s => `### ${displayName(s.def.name)}\n**Dispatch as:** \`${s.def.name}\`\n${s.def.description}\n**Tools:** ${s.def.tools}\n**Model:** ${s.def.model || "current session model"}\n**Thinking:** ${s.def.thinking || "off"}`)
                 .join("\n\n");
             const members = Array.from(agentStates.values()).map(s => displayName(s.def.name)).join(", ");
 
@@ -1369,7 +1385,7 @@ ${catalog}`,
                 .map(s => {
                     const def = allAgents.get(s.agent.toLowerCase());
                     if (!def) return `### ${displayName(s.agent)}\nAgent not found.`;
-                    return `### ${displayName(def.name)}\n${def.description}\n**Tools:** ${def.tools}\n\n${def.systemPrompt}`;
+                    return `### ${displayName(def.name)}\n${def.description}\n**Tools:** ${def.tools}\n**Model:** ${def.model || "current session model"}\n**Thinking:** ${def.thinking || "off"}\n\n${def.systemPrompt}`;
                 })
                 .join("\n\n---\n\n");
 
