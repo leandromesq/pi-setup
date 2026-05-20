@@ -1218,11 +1218,8 @@ export default function (pi: ExtensionAPI) {
 
             const name = teamNames[options.indexOf(choice)];
             activateTeam(name);
-            updateTeamWidget();
-            savePrefs(currentPrefs());
-            ctx.ui.setStatus("orchestrator", `Mode: team · ${name} (${agentStates.size})`);
+            switchMode("team", ctx);
             ctx.ui.notify(`Team: ${name} — ${Array.from(agentStates.values()).map(s => displayName(s.def.name)).join(", ")}`, "info");
-            updateFooter(ctx);
         },
     });
 
@@ -1269,10 +1266,8 @@ export default function (pi: ExtensionAPI) {
 
             const chain = chains[options.indexOf(choice)];
             activateChain(chain);
-            savePrefs(currentPrefs());
-            ctx.ui.setStatus("orchestrator", `Mode: chain · ${chain.name} (${chain.steps.length} steps)`);
+            switchMode("chain", ctx);
             ctx.ui.notify(`Chain: ${chain.name}\n${chain.description}\n${chain.steps.map(s => displayName(s.agent)).join(" → ")}`, "info");
-            updateFooter(ctx);
         },
     });
 
