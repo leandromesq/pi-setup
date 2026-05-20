@@ -69,28 +69,22 @@ Commands and flags:
 
 ### `obsidian`
 
-Adds Obsidian vault note-taking tools and `/ob-*` commands for creating, searching, opening, editing, appending, templating, deleting, and capture-mode note taking. Notes are formatted in Brazilian Portuguese, preserve the user's wording as much as possible, support CS-friendly Markdown structures like code fences and LaTeX math, and require confirmation before deletion.
+Adds a simple Obsidian workflow for searching, opening, removing, editing, and model-formatting notes. Notes use one standard format: YAML `date` property plus a `YYYY-MM-DD HH:mm - Title` heading. Content is formatted in Brazilian Portuguese while preserving the user's wording as much as possible.
 
 Config:
 
-- `~/.pi/obsidian.json` — stores `vaultPath`, `vaultName`, `templatesDir`, `defaultNotesDir`, and `language`.
+- `~/.pi/obsidian.json` — stores `vaultPath`, `vaultName`, `defaultNotesDir`, and `language`.
 
 Commands:
 
 - `/ob-config` — show or update Obsidian config.
-- `/ob-config test` — validate the configured vault/templates.
-- `/ob-new <title>` — create a general note with date/time metadata.
-- `/ob-lesson <title>` — create a lesson note with matéria and professor fields.
-- `/ob-open [term]` — search/select and open a note in Obsidian.
+- `/ob-config test` — validate the configured vault.
 - `/ob-search <term>` — search notes by filename and contents.
-- `/ob-delete [term]` — search/select/delete a note after confirmation.
-- `/ob-capture-start <title>` — start raw capture mode into a new note; non-command messages append directly.
-- `/ob-capture-ai-start <title>` — start AI-formatted capture mode into a new note.
-- `/ob-capture-file [term]` — search/select an existing note and start raw capture into it.
-- `/ob-capture-ai-file [term]` — search/select an existing note and start AI-formatted capture into it.
-- `/ob-format [term]` — format/improve an existing note's Markdown while preserving content.
-- `/ob-format-current` — format/improve the active or most recently captured note.
-- `/ob-capture-stop` — stop capture mode.
+- `/ob-open [term]` — search/select/open a note and set it as current.
+- `/ob-remove [term]` — search/select/remove a note after confirmation.
+- `/ob-edit-start [term|title]` — select an existing note or create a new current note; normal messages append to it.
+- `/ob-edit-stop` — stop appending messages to the current note.
+- `/ob-format` — format the current note using the model.
 
 ### `pwsh-user-bash`
 
