@@ -158,7 +158,7 @@ function displayName(name: string): string {
 function parseAgentFile(filePath: string): AgentDef | null {
     try {
         const raw = fs.readFileSync(filePath, "utf-8");
-        const match = raw.match(/^---\n([\s\S]*?)\n---\n([\s\S]*)$/);
+        const match = raw.match(/^---\r?\n([\s\S]*?)\r?\n---\r?\n([\s\S]*)$/);
         if (!match) return null;
 
         const fm: Record<string, string> = {};
