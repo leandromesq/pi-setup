@@ -27,6 +27,7 @@
  */
 
 import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Container, Text, type AutocompleteItem, visibleWidth } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
@@ -46,12 +47,12 @@ const BUILTIN_TOOLS = new Set(["read", "write", "edit", "bash", "grep", "find", 
 // Extension-provided tools: maps tool name → path to the extension's index.ts.
 // Add entries here for any custom tool an agent .md file might declare.
 const EXT_BASE = path.join(os.homedir(), ".pi", "agent", "extensions");
-const SUBAGENTS_EXT = path.join(path.dirname(new URL(import.meta.url).pathname), "..", "subagents", "index.ts");
+const SUBAGENTS_EXT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "subagents", "index.ts");
 const CUSTOM_TOOL_EXTENSIONS: Record<string, string> = {
     subagent: SUBAGENTS_EXT,
     web_search: path.join(EXT_BASE, "web-search", "index.ts"),
     web_fetch: path.join(EXT_BASE, "web-fetch", "index.ts"),
-    safe_bash: path.join(path.dirname(new URL(import.meta.url).pathname), "..", "subagents", "tools", "safe-bash.ts"),
+    safe_bash: path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "subagents", "tools", "safe-bash.ts"),
 };
 
 /** Resolve the actual pi executable — prefers node + entry-script to avoid
