@@ -1,14 +1,9 @@
 /**
- * Agent Orchestrator — Unified subagent spawning, team dispatch, and chain pipeline
+ * Agent Orchestrator — Team dispatch and chain pipeline
  *
- * Three orchestration modes, switch with /mode:
+ * Two orchestration modes, switch with /mode:
  *
- *   subagent (default)
- *     Free-form background subagents with live stacking widgets.
- *     Tools: subagent_create, subagent_continue, subagent_remove, subagent_list
- *     Commands: /sub <task>  /subcont <id> <prompt>  /subrm <id>  /subclear  /sublist
- *
- *   team
+ *   team (default)
  *     Dispatcher-only orchestrator — main agent has NO codebase tools.
  *     Agent .md files: ~/.pi/agent/agents/  or  agents/  .claude/agents/  .pi/agents/  in cwd
  *     Teams: ~/.pi/agent/agents/teams.yaml  (merged with .pi/agents/teams.yaml per project)
@@ -21,14 +16,17 @@
  *     Tool: run_chain  (plus all default tools)
  *     Commands: /chain  /chain-list  /chain-run <task>
  *
+ * Agents can declare `subagent` in their tools frontmatter to spawn sub-processes
+ * via the subagents extension. Use `subagent_agents: scout, researcher` to restrict
+ * which agents they can spawn (enforced via PI_SUBAGENT_ALLOWED env).
+ *
  * Mode + active team/chain persists across /new via ~/.pi/agent/orchestrator-prefs.json
  */
 
+import { spawn } from "node:child_process";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { DynamicBorder } from "@earendil-works/pi-coding-agent";
 import { Container, Text, type AutocompleteItem, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
-const { spawn } = require("child_process") as any;
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
@@ -39,38 +37,55 @@ const DEFAULT_MODEL = "openrouter/google/gemini-2.5-flash-preview";
 const GLOBAL_AGENTS_DIR = path.join(os.homedir(), ".pi", "agent", "agents");
 const PREFS_FILE = path.join(os.homedir(), ".pi", "agent", "orchestrator-prefs.json");
 
-/** Resolve the pi executable name ("pi.cmd" on Windows, "pi" elsewhere) */
-function getPiCommand(): string {
-    return process.platform === "win32" ? "pi.cmd" : "pi";
+// Built-in tools pi provides natively (no extension flag needed)
+const BUILTIN_TOOLS = new Set(["read", "write", "edit", "bash", "grep", "find", "ls"]);
+
+// Extension-provided tools: maps tool name → path to the extension's index.ts.
+// Add entries here for any custom tool an agent .md file might declare.
+const EXT_BASE = path.join(os.homedir(), ".pi", "agent", "extensions");
+const SUBAGENTS_EXT = path.join(path.dirname(new URL(import.meta.url).pathname), "..", "subagents", "index.ts");
+const CUSTOM_TOOL_EXTENSIONS: Record<string, string> = {
+    subagent: SUBAGENTS_EXT,
+    web_search: path.join(EXT_BASE, "web-search", "index.ts"),
+    web_fetch: path.join(EXT_BASE, "web-fetch", "index.ts"),
+    safe_bash: path.join(path.dirname(new URL(import.meta.url).pathname), "..", "subagents", "tools", "safe-bash.ts"),
+};
+
+/** Resolve the actual pi executable — prefers node + entry-script to avoid
+ *  shell wrapper issues on Windows. Falls back to `pi.cmd` / `pi` in PATH. */
+function resolvePiBinary(): { command: string; baseArgs: string[] } {
+    const entry = process.argv[1];
+    if (entry) {
+        try {
+            const realEntry = fs.realpathSync(entry);
+            if (/\.(?:mjs|cjs|js)$/i.test(realEntry)) {
+                return { command: process.execPath, baseArgs: [realEntry] };
+            }
+        } catch {}
+    }
+    return { command: process.platform === "win32" ? "pi.cmd" : "pi", baseArgs: [] };
 }
 
-/** Spawn options shared by all subprocess calls */
-function getSpawnOptions(): any {
-    const opts: any = { stdio: ["ignore", "pipe", "pipe"], env: { ...process.env } };
-    if (process.platform === "win32") opts.shell = true;
+/** Spawn options — adds shell:true on Windows only when falling back to pi.cmd */
+function getSpawnOptions(childEnv?: NodeJS.ProcessEnv): any {
+    const { baseArgs } = resolvePiBinary();
+    const opts: any = {
+        stdio: ["ignore", "pipe", "pipe"],
+        env: childEnv ?? { ...process.env },
+    };
+    // Only need shell when calling pi.cmd (no baseArgs means we're using the cmd wrapper)
+    if (process.platform === "win32" && baseArgs.length === 0) opts.shell = true;
     return opts;
 }
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
-type OrchestratorMode = "subagent" | "team" | "chain";
+type OrchestratorMode = "team" | "chain";
 
 interface OrchestratorPrefs {
     mode: OrchestratorMode;
     activeTeam?: string;
     activeChain?: string;
-}
-
-interface SubState {
-    id: number;
-    status: "running" | "done" | "error";
-    task: string;
-    textChunks: string[];
-    toolCount: number;
-    elapsed: number;
-    sessionFile: string;
-    turnCount: number;
-    proc?: any;
 }
 
 interface AgentDef {
@@ -81,6 +96,8 @@ interface AgentDef {
     model?: string;
     thinking?: string;
     file?: string;
+    /** If `subagent` is in tools, restrict which agents this agent may spawn. */
+    subagentAgents?: string[];
 }
 
 interface AgentState {
@@ -120,9 +137,9 @@ function loadPrefs(): OrchestratorPrefs {
     try {
         const raw = fs.readFileSync(PREFS_FILE, "utf-8");
         const data = JSON.parse(raw);
-        if (["subagent", "team", "chain"].includes(data.mode)) return data as OrchestratorPrefs;
+        if (["team", "chain"].includes(data.mode)) return data as OrchestratorPrefs;
     } catch {}
-    return { mode: "subagent" };
+    return { mode: "team" };
 }
 
 function savePrefs(prefs: OrchestratorPrefs) {
@@ -156,6 +173,9 @@ function parseAgentFile(filePath: string): AgentDef | null {
             model: fm.model || undefined,
             thinking: fm.thinking || undefined,
             file: filePath,
+            subagentAgents: fm.subagent_agents
+                ? fm.subagent_agents.split(",").map(s => s.trim()).filter(Boolean)
+                : undefined,
         };
     } catch { return null; }
 }
@@ -169,7 +189,6 @@ function scanAgentDirs(cwd: string): AgentDef[] {
         path.join(cwd, ".pi", "agents"),
     ];
     const agents: AgentDef[] = [];
-    const seen = new Set<string>();
 
     for (const dir of dirs) {
         if (!fs.existsSync(dir)) continue;
@@ -180,10 +199,9 @@ function scanAgentDirs(cwd: string): AgentDef[] {
                 const def = parseAgentFile(fullPath);
                 if (!def) continue;
                 const key = def.name.toLowerCase();
-                // Later dirs override earlier ones (project overrides global)
                 const existingIdx = agents.findIndex(a => a.name.toLowerCase() === key);
                 if (existingIdx >= 0) agents[existingIdx] = def;
-                else { seen.add(key); agents.push(def); }
+                else agents.push(def);
             }
         } catch {}
     }
@@ -240,15 +258,10 @@ function parseChainYaml(raw: string): ChainDef[] {
 export default function (pi: ExtensionAPI) {
 
     // ── Global state ──────────────────────────────────────────────────────────
-    let mode: OrchestratorMode = "subagent";
+    let mode: OrchestratorMode = "team";
     let widgetCtx: any;
     let baseTools: string[] = [];
-    const subagentToolNames = ["subagent_create", "subagent_continue", "subagent_remove", "subagent_list"];
-    const orchestratorToolNames = new Set([...subagentToolNames, "dispatch_agent", "run_chain"]);
-
-    // ── Subagent state ────────────────────────────────────────────────────────
-    const agents: Map<number, SubState> = new Map();
-    let nextId = 1;
+    const orchestratorToolNames = new Set(["dispatch_agent", "run_chain"]);
 
     // ── Team state ────────────────────────────────────────────────────────────
     const agentStates: Map<string, AgentState> = new Map();
@@ -272,58 +285,6 @@ export default function (pi: ExtensionAPI) {
 
     function currentPrefs(): OrchestratorPrefs {
         return { mode, activeTeam: activeTeamName || undefined, activeChain: activeChain?.name };
-    }
-
-    // ── Subagent helpers ──────────────────────────────────────────────────────
-
-    function makeSubagentSessionFile(id: number): string {
-        const dir = path.join(os.homedir(), ".pi", "agent", "sessions", "subagents");
-        fs.mkdirSync(dir, { recursive: true });
-        return path.join(dir, `subagent-${id}-${Date.now()}.jsonl`);
-    }
-
-    // ── Subagent widget ───────────────────────────────────────────────────────
-
-    function updateSubWidgets() {
-        if (!widgetCtx) return;
-        for (const [id, state] of Array.from(agents.entries())) {
-            const key = `sub-${id}`;
-            widgetCtx.ui.setWidget(key, (_tui: any, theme: any) => {
-                const container = new Container();
-                const borderFn = (s: string) => theme.fg("dim", s);
-                container.addChild(new Text("", 0, 0));
-                container.addChild(new DynamicBorder(borderFn));
-                const content = new Text("", 1, 0);
-                container.addChild(content);
-                container.addChild(new DynamicBorder(borderFn));
-                return {
-                    render(width: number): string[] {
-                        const lines: string[] = [];
-                        const sc = state.status === "running" ? "accent" : state.status === "done" ? "success" : "error";
-                        const si = state.status === "running" ? "●" : state.status === "done" ? "✓" : "✗";
-                        const taskPreview = state.task.length > 40 ? state.task.slice(0, 37) + "..." : state.task;
-                        const turnLabel = state.turnCount > 1 ? theme.fg("dim", ` · Turn ${state.turnCount}`) : "";
-
-                        lines.push(
-                            theme.fg(sc, `${si} Subagent #${state.id}`) + turnLabel +
-                            theme.fg("dim", `  ${taskPreview}`) +
-                            theme.fg("dim", `  (${Math.round(state.elapsed / 1000)}s)`) +
-                            theme.fg("dim", ` | Tools: ${state.toolCount}`)
-                        );
-
-                        const lastLine = state.textChunks.join("").split("\n").filter((l: string) => l.trim()).pop() || "";
-                        if (lastLine) {
-                            const trimmed = lastLine.length > width - 10 ? lastLine.slice(0, width - 13) + "..." : lastLine;
-                            lines.push(theme.fg("muted", `  ${trimmed}`));
-                        }
-
-                        content.setText(lines.join("\n"));
-                        return container.render(width);
-                    },
-                    invalidate() { container.invalidate(); },
-                };
-            });
-        }
     }
 
     // ── Team widget ───────────────────────────────────────────────────────────
@@ -355,9 +316,7 @@ export default function (pi: ExtensionAPI) {
         const filled = Math.max(0, Math.min(5, Math.ceil(contextPct / 20)));
         const barColor = contextPct > 80 ? "error" : contextPct > 50 ? "warning" : "success";
         const barStr = theme.fg(barColor, "#".repeat(filled)) + theme.fg("dim", "-".repeat(5 - filled)) + ` ${Math.ceil(contextPct)}%`;
-        const ctxLine = barStr;
 
-        // Idle: show description in a distinct color. Running/done: show last work output
         const workRaw = (state.task && state.lastWork) ? state.lastWork
             : state.task ? state.task
             : state.def.description;
@@ -365,7 +324,6 @@ export default function (pi: ExtensionAPI) {
         const workColor = state.status === "idle" ? "dim" : state.status === "running" ? "accent" : "muted";
         const workLine = theme.fg(workColor, workText);
 
-        // Border color matches status for visual pop
         const borderColor = state.status === "idle" ? "dim" : sc;
         const top = theme.fg(borderColor, "┌" + "─".repeat(w) + "┐");
         const bot = theme.fg(borderColor, "└" + "─".repeat(w) + "┘");
@@ -376,7 +334,7 @@ export default function (pi: ExtensionAPI) {
             top,
             bdr(" " + nameStr, 1 + nameVis),
             bdr(" " + statusLine, 1 + statusVis),
-            bdr(" " + ctxLine, 1 + visibleWidth(ctxLine)),
+            bdr(" " + barStr, 1 + visibleWidth(barStr)),
             bdr(" " + workLine, 1 + workText.length),
             bot,
         ];
@@ -437,7 +395,6 @@ export default function (pi: ExtensionAPI) {
         const statusLine = theme.fg(sc, statusStr + timeStr);
         const statusVis = statusStr.length + timeStr.length;
 
-        // Pending: show agent description. Running/done: show last work output
         const agentDef = allAgents.get(state.agent.toLowerCase());
         const workRaw = state.lastWork || (state.status === "pending" && agentDef ? agentDef.description : "");
         const workText = workRaw ? trunc(workRaw, Math.min(50, w - 1)) : "";
@@ -497,9 +454,8 @@ export default function (pi: ExtensionAPI) {
     function updateFooter(ctx: any) {
         if (!ctx) return;
         let modeLabel: string;
-        if (mode === "team") modeLabel = `team:${activeTeamName || "no-team"}`;
-        else if (mode === "chain") modeLabel = `chain:${activeChain?.name || "no-chain"}`;
-        else modeLabel = "subagent";
+        if (mode === "chain") modeLabel = `chain:${activeChain?.name || "no-chain"}`;
+        else modeLabel = `team:${activeTeamName || "no-team"}`;
 
         (globalThis as any).__piOrchestratorModeTitle = modeLabel;
         ctx.ui.requestRender?.();
@@ -513,7 +469,6 @@ export default function (pi: ExtensionAPI) {
 
         allAgentDefs = scanAgentDirs(cwd);
 
-        // Global teams merged with project teams (project overrides global)
         teams = {};
         for (const tp of [
             path.join(GLOBAL_AGENTS_DIR, "teams.yaml"),
@@ -540,7 +495,6 @@ export default function (pi: ExtensionAPI) {
             agentSessions.set(key, fs.existsSync(sf) ? sf : null);
         }
 
-        // Global chains merged with project chains (project overrides global by name)
         chains = [];
         for (const cp of [
             path.join(GLOBAL_AGENTS_DIR, "agent-chain.yaml"),
@@ -585,7 +539,7 @@ export default function (pi: ExtensionAPI) {
         if (!pendingReset) updateChainWidget();
     }
 
-    // ── Model helpers ────────────────────────────────────────────────────────
+    // ── Model helpers ─────────────────────────────────────────────────────────
 
     function modelFor(ctx: any, agentDef?: AgentDef): string {
         return agentDef?.model || (ctx.model ? `${ctx.model.provider}/${ctx.model.id}` : DEFAULT_MODEL);
@@ -595,97 +549,68 @@ export default function (pi: ExtensionAPI) {
         return agentDef?.thinking || "off";
     }
 
-    // ── Subagent spawner ──────────────────────────────────────────────────────
+    // ── Spawn helpers for team/chain agents ───────────────────────────────────
 
-    function spawnSubagent(state: SubState, prompt: string, ctx: any, notifyMain = true): Promise<void> {
-        const model = modelFor(ctx);
+    /**
+     * Build the args array and childEnv for spawning a team or chain agent.
+     * Writes the system prompt to a file in sessionDir to avoid shell-escaping issues.
+     */
+    function buildAgentSpawnArgs(params: {
+        agentKey: string;
+        def: AgentDef;
+        model: string;
+        thinking: string;
+        sessionFile: string;
+        hasExistingSession: boolean;
+        task: string;
+        sessionDir: string;
+    }): { command: string; args: string[]; childEnv: NodeJS.ProcessEnv | undefined } {
+        const { agentKey, def, model, thinking, sessionFile, hasExistingSession, task, sessionDir } = params;
+        const { command, baseArgs } = resolvePiBinary();
 
-        return new Promise<void>((resolve) => {
-            const proc = spawn(getPiCommand(), [
-                "--mode", "json", "-p",
-                "--session", state.sessionFile,
-                "--no-extensions",
-                "--model", model,
-                "--tools", "read,bash,grep,find,ls",
-                "--thinking", "off",
-                prompt,
-            ], getSpawnOptions());
+        // Write system prompt to file (avoids shell-escaping issues with multiline prompts)
+        const promptPath = path.join(sessionDir, `${agentKey}-prompt.md`);
+        try { fs.writeFileSync(promptPath, def.systemPrompt, { encoding: "utf-8" }); } catch {}
 
-            // Register error listener FIRST — before any state mutation.
-            // On Windows, spawn can fail synchronously; without a listener
-            // the 'error' event becomes an uncaught exception that crashes pi.
-            let timer: ReturnType<typeof setInterval> | null = null;
-            proc.on("error", (err: any) => {
-                if (timer) clearInterval(timer);
-                state.status = "error";
-                state.proc = undefined;
-                state.textChunks.push(`Error: ${err.message}`);
-                updateSubWidgets();
-                resolve();
-            });
+        // Separate builtin tools from extension-provided tools
+        const toolList = def.tools.split(",").map(t => t.trim()).filter(Boolean);
+        const allowlist: string[] = [];
+        const extPaths = new Set<string>();
+        for (const tool of toolList) {
+            if (BUILTIN_TOOLS.has(tool)) {
+                allowlist.push(tool);
+            } else if (CUSTOM_TOOL_EXTENSIONS[tool]) {
+                allowlist.push(tool);
+                extPaths.add(CUSTOM_TOOL_EXTENSIONS[tool]);
+            }
+        }
 
-            state.proc = proc;
-            const startTime = Date.now();
-            timer = setInterval(() => { state.elapsed = Date.now() - startTime; updateSubWidgets(); }, 1000);
-            let buffer = "";
+        const args = [
+            ...baseArgs,
+            "--mode", "json", "-p", "--no-extensions",
+            "--model", model,
+            "--thinking", thinking,
+            "--append-system-prompt", promptPath,
+            "--session", sessionFile,
+        ];
 
-            proc.stdout!.setEncoding("utf-8");
-            proc.stdout!.on("data", (chunk: string) => {
-                buffer += chunk;
-                const lines = buffer.split("\n");
-                buffer = lines.pop() || "";
-                for (const line of lines) {
-                    if (!line.trim()) continue;
-                    try {
-                        const ev = JSON.parse(line);
-                        if (ev.type === "message_update" && ev.assistantMessageEvent?.type === "text_delta") {
-                            state.textChunks.push(ev.assistantMessageEvent.delta || "");
-                            updateSubWidgets();
-                        } else if (ev.type === "tool_execution_start") {
-                            state.toolCount++;
-                            updateSubWidgets();
-                        }
-                    } catch {}
-                }
-            });
+        if (allowlist.length > 0) {
+            args.push("--tools", allowlist.join(","));
+        } else {
+            args.push("--no-tools");
+        }
+        for (const p of extPaths) args.push("--extension", p);
 
-            proc.stderr!.setEncoding("utf-8");
-            proc.stderr!.on("data", (chunk: string) => {
-                if (chunk.trim()) { state.textChunks.push(chunk); updateSubWidgets(); }
-            });
+        if (hasExistingSession) args.push("-c");
+        args.push(task);
 
-            proc.on("close", (code: number | null) => {
-                if (buffer.trim()) {
-                    try {
-                        const ev = JSON.parse(buffer);
-                        if (ev.type === "message_update" && ev.assistantMessageEvent?.type === "text_delta")
-                            state.textChunks.push(ev.assistantMessageEvent.delta || "");
-                    } catch {}
-                }
+        // PI_SUBAGENT_ALLOWED env for recursion depth control
+        let childEnv: NodeJS.ProcessEnv | undefined;
+        if (toolList.includes("subagent") && def.subagentAgents && def.subagentAgents.length > 0) {
+            childEnv = { ...process.env, PI_SUBAGENT_ALLOWED: def.subagentAgents.join(",") };
+        }
 
-                clearInterval(timer);
-                state.elapsed = Date.now() - startTime;
-                state.status = code === 0 ? "done" : "error";
-                state.proc = undefined;
-                updateSubWidgets();
-
-                ctx.ui.notify(
-                    `Subagent #${state.id} ${state.status} in ${Math.round(state.elapsed / 1000)}s`,
-                    state.status === "done" ? "success" : "error"
-                );
-
-                if (notifyMain) {
-                    const result = state.textChunks.join("");
-                    pi.sendMessage({
-                        customType: "subagent-result",
-                        content: `Subagent #${state.id}${state.turnCount > 1 ? ` (Turn ${state.turnCount})` : ""} finished "${prompt}" in ${Math.round(state.elapsed / 1000)}s.\n\nResult:\n${result.slice(0, 8000)}${result.length > 8000 ? "\n\n... [truncated]" : ""}`,
-                        display: true,
-                    }, { deliverAs: "followUp", triggerTurn: true });
-                }
-
-                resolve();
-            });
-        });
+        return { command, args, childEnv };
     }
 
     // ── Team agent dispatcher ─────────────────────────────────────────────────
@@ -709,27 +634,23 @@ export default function (pi: ExtensionAPI) {
         const startTime = Date.now();
         state.timer = setInterval(() => { state.elapsed = Date.now() - startTime; updateTeamWidget(); }, 1000);
 
-        const model = modelFor(ctx, state.def);
-        const thinking = thinkingFor(state.def);
         const agentKey = state.def.name.toLowerCase().replace(/\s+/g, "-");
         const sessionFile = path.join(teamSessionDir, `${agentKey}.json`);
-
-        const args = [
-            "--mode", "json", "-p", "--no-extensions",
-            "--model", model,
-            "--tools", state.def.tools,
-            "--thinking", thinking,
-            "--append-system-prompt", state.def.systemPrompt,
-            "--session", sessionFile,
-        ];
-        if (state.sessionFile) args.push("-c");
-        args.push(task);
+        const { command, args, childEnv } = buildAgentSpawnArgs({
+            agentKey,
+            def: state.def,
+            model: modelFor(ctx, state.def),
+            thinking: thinkingFor(state.def),
+            sessionFile,
+            hasExistingSession: !!state.sessionFile,
+            task,
+            sessionDir: teamSessionDir,
+        });
 
         const textChunks: string[] = [];
         return new Promise((resolve) => {
-            const proc = spawn(getPiCommand(), args, getSpawnOptions());
+            const proc = spawn(command, args, getSpawnOptions(childEnv));
 
-            // Register error listener FIRST — before any state reads/writes
             proc.on("error", (err: any) => {
                 clearInterval(state.timer);
                 state.status = "error"; state.lastWork = `Error: ${err.message}`; updateTeamWidget();
@@ -794,31 +715,28 @@ export default function (pi: ExtensionAPI) {
     // ── Chain step runner ─────────────────────────────────────────────────────
 
     function runChainAgent(agentDef: AgentDef, task: string, stepIndex: number, ctx: any): Promise<{ output: string; exitCode: number; elapsed: number }> {
-        const model = modelFor(ctx, agentDef);
-        const thinking = thinkingFor(agentDef);
         const agentKey = agentDef.name.toLowerCase().replace(/\s+/g, "-");
         const sessionFile = path.join(chainSessionDir, `chain-${agentKey}.json`);
-        const hasSession = agentSessions.get(agentKey);
+        const hasSession = !!agentSessions.get(agentKey);
 
-        const args = [
-            "--mode", "json", "-p", "--no-extensions",
-            "--model", model,
-            "--tools", agentDef.tools,
-            "--thinking", thinking,
-            "--append-system-prompt", agentDef.systemPrompt,
-            "--session", sessionFile,
-        ];
-        if (hasSession) args.push("-c");
-        args.push(task);
+        const { command, args, childEnv } = buildAgentSpawnArgs({
+            agentKey,
+            def: agentDef,
+            model: modelFor(ctx, agentDef),
+            thinking: thinkingFor(agentDef),
+            sessionFile,
+            hasExistingSession: hasSession,
+            task,
+            sessionDir: chainSessionDir,
+        });
 
         const textChunks: string[] = [];
         const startTime = Date.now();
         const state = stepStates[stepIndex];
 
         return new Promise((resolve) => {
-            const proc = spawn(getPiCommand(), args, getSpawnOptions());
+            const proc = spawn(command, args, getSpawnOptions(childEnv));
 
-            // Register error listener FIRST — before any state reads/writes
             let timer: ReturnType<typeof setInterval> | null = null;
             proc.on("error", (err: any) => {
                 if (timer) clearInterval(timer);
@@ -915,28 +833,21 @@ export default function (pi: ExtensionAPI) {
 
     function activeToolsForMode(): string[] {
         if (mode === "team") return Array.from(new Set([...readSearchTools(), "dispatch_agent"]));
-        if (mode === "chain") return Array.from(new Set([...baseTools, "run_chain"]));
-        return Array.from(new Set([...baseTools, ...subagentToolNames]));
+        return Array.from(new Set([...baseTools, "run_chain"]));
     }
 
     function applyMode(ctx: any) {
         pi.setActiveTools(activeToolsForMode());
 
-        // Clear widgets from non-active modes first
         ctx.ui.setWidget("agent-team", undefined);
         ctx.ui.setWidget("agent-chain", undefined);
 
         if (mode === "team") {
             updateTeamWidget();
             ctx.ui.setStatus("orchestrator", `Mode: team · ${activeTeamName} (${agentStates.size})`);
-        } else if (mode === "chain") {
+        } else {
             updateChainWidget();
             ctx.ui.setStatus("orchestrator", `Mode: chain · ${activeChain?.name || "no chain"}`);
-        } else {
-            // Clear subagent widgets too on mode switch? No — preserve them, user might come back.
-            // Just re-render existing subagent widgets.
-            updateSubWidgets();
-            ctx.ui.setStatus("orchestrator", `Mode: subagent (${agents.size} active)`);
         }
         updateFooter(ctx);
     }
@@ -948,81 +859,6 @@ export default function (pi: ExtensionAPI) {
     }
 
     // ── Tool registrations ────────────────────────────────────────────────────
-
-    pi.registerTool({
-        name: "subagent_create",
-        label: "Subagent Create",
-        description: "Spawn a background subagent to perform a task. Returns the subagent ID immediately. Results are delivered as a follow-up message when finished (unless notifyMain is false).",
-        parameters: Type.Object({
-            task: Type.String({ description: "The complete task description for the subagent to perform" }),
-            notifyMain: Type.Optional(Type.Boolean({ description: "Deliver result as follow-up and trigger a new LLM turn. Default: true. Set false when running multiple parallel subagents to avoid N turn triggers." })),
-        }),
-        execute: async (_callId, args, _signal, _onUpdate, ctx) => {
-            widgetCtx = ctx;
-            const id = nextId++;
-            const state: SubState = {
-                id, status: "running", task: args.task, textChunks: [], toolCount: 0,
-                elapsed: 0, sessionFile: makeSubagentSessionFile(id), turnCount: 1,
-            };
-            agents.set(id, state);
-            updateSubWidgets();
-            spawnSubagent(state, args.task, ctx, args.notifyMain !== false).catch(() => {});
-            return { content: [{ type: "text", text: `Subagent #${id} spawned.${args.notifyMain === false ? " Results will be shown in widget only." : ""}` }], details: { id, status: "running", notifyMain: args.notifyMain !== false } };
-        },
-    });
-
-    pi.registerTool({
-        name: "subagent_continue",
-        label: "Subagent Continue",
-        description: "Continue an existing subagent's conversation with follow-up instructions. The subagent must be finished.",
-        parameters: Type.Object({
-            id: Type.Number({ description: "The ID of the subagent to continue" }),
-            prompt: Type.String({ description: "The follow-up prompt or new instructions" }),
-            notifyMain: Type.Optional(Type.Boolean({ description: "Deliver result as follow-up and trigger a new LLM turn. Default: true." })),
-        }),
-        execute: async (_callId, args, _signal, _onUpdate, ctx) => {
-            widgetCtx = ctx;
-            const state = agents.get(args.id);
-            if (!state) return { content: [{ type: "text", text: `Error: No subagent #${args.id} found.` }], details: { id: args.id, status: "error", error: "not_found" } };
-            if (state.status === "running") return { content: [{ type: "text", text: `Error: Subagent #${args.id} is still running.` }], details: { id: args.id, status: "error", error: "running" } };
-
-            state.status = "running"; state.task = args.prompt;
-            state.textChunks = []; state.elapsed = 0; state.turnCount++;
-            updateSubWidgets();
-            ctx.ui.notify(`Continuing Subagent #${args.id} (Turn ${state.turnCount})…`, "info");
-            spawnSubagent(state, args.prompt, ctx, args.notifyMain !== false).catch(() => {});
-            return { content: [{ type: "text", text: `Subagent #${args.id} continuing (Turn ${state.turnCount}).` }], details: { id: args.id, status: "running", turnCount: state.turnCount, notifyMain: args.notifyMain !== false } };
-        },
-    });
-
-    pi.registerTool({
-        name: "subagent_remove",
-        label: "Subagent Remove",
-        description: "Remove a specific subagent and its widget. Kills it if currently running.",
-        parameters: Type.Object({ id: Type.Number({ description: "The ID of the subagent to remove" }) }),
-        execute: async (_callId, args, _signal, _onUpdate, ctx) => {
-            widgetCtx = ctx;
-            const state = agents.get(args.id);
-            if (!state) return { content: [{ type: "text", text: `Error: No subagent #${args.id} found.` }], details: { id: args.id, status: "error", error: "not_found" } };
-            if (state.proc && state.status === "running") state.proc.kill("SIGTERM");
-            ctx.ui.setWidget(`sub-${args.id}`, undefined);
-            agents.delete(args.id);
-            return { content: [{ type: "text", text: `Subagent #${args.id} removed.` }], details: { id: args.id, status: "removed" } };
-        },
-    });
-
-    pi.registerTool({
-        name: "subagent_list",
-        label: "Subagent List",
-        description: "List all active and finished subagents with their IDs, tasks, and status.",
-        parameters: Type.Object({}),
-        execute: async () => {
-            if (agents.size === 0) return { content: [{ type: "text", text: "No active subagents." }], details: { agents: [] } };
-            const list = Array.from(agents.values())
-                .map(s => `#${s.id} [${s.status.toUpperCase()}] (Turn ${s.turnCount}) - ${s.task}`).join("\n");
-            return { content: [{ type: "text", text: `Subagents:\n${list}` }], details: { agents: Array.from(agents.values()).map(s => ({ id: s.id, status: s.status, task: s.task, turnCount: s.turnCount, toolCount: s.toolCount, elapsed: s.elapsed })) } };
-        },
-    });
 
     pi.registerTool({
         name: "dispatch_agent",
@@ -1104,17 +940,15 @@ export default function (pi: ExtensionAPI) {
             let newMode = args?.trim();
 
             if (newMode === "status") {
-                const subInfo = `${agents.size} subagent(s)`;
                 const teamInfo = activeTeamName ? `${activeTeamName} (${agentStates.size} agents)` : `${Object.keys(teams).length} team(s) loaded`;
                 const chainInfo = activeChain ? `${activeChain.name} (${activeChain.steps.length} steps)` : `${chains.length} chain(s) loaded`;
-                ctx.ui.notify(`Mode: ${mode}\nSubagents: ${subInfo}\nTeam: ${teamInfo}\nChain: ${chainInfo}\nTools: ${activeToolsForMode().join(", ")}`, "info");
+                ctx.ui.notify(`Mode: ${mode}\nTeam: ${teamInfo}\nChain: ${chainInfo}\nTools: ${activeToolsForMode().join(", ")}`, "info");
                 return;
             }
 
             if (!newMode) {
-                const modeValues: OrchestratorMode[] = ["subagent", "team", "chain"];
+                const modeValues: OrchestratorMode[] = ["team", "chain"];
                 const optionLabels = modeValues.map(value => {
-                    if (value === "subagent") return `subagent${mode === value ? " ◀ current" : ""} — free-form background subagents (${agents.size} active)`;
                     if (value === "team") return `team${mode === value ? " ◀ current" : ""} — dispatcher with specialist agent grid (${activeTeamName || Object.keys(teams).length + " teams"})`;
                     return `chain${mode === value ? " ◀ current" : ""} — sequential pipeline (${activeChain?.name || chains.length + " chains"})`;
                 });
@@ -1123,112 +957,13 @@ export default function (pi: ExtensionAPI) {
                 newMode = modeValues[optionLabels.indexOf(choice)];
             }
 
-            if (!["subagent", "team", "chain"].includes(newMode)) {
-                ctx.ui.notify("Invalid mode. Use: subagent, team, or chain", "error"); return;
+            if (!["team", "chain"].includes(newMode)) {
+                ctx.ui.notify("Invalid mode. Use: team or chain", "error"); return;
             }
             if (newMode === mode) { ctx.ui.notify(`Already in ${mode} mode`, "info"); return; }
 
             switchMode(newMode as OrchestratorMode, ctx);
             ctx.ui.notify(`Switched to ${mode} mode`, "info");
-        },
-    });
-
-    // — Subagent commands —
-
-    pi.registerCommand("sub", {
-        description: "Spawn a background subagent: /sub <task>",
-        handler: async (args, ctx) => {
-            try {
-                widgetCtx = ctx;
-                const task = args?.trim();
-                if (!task) { ctx.ui.notify("Usage: /sub <task>", "error"); return; }
-
-                const id = nextId++;
-                const state: SubState = {
-                    id, status: "running", task, textChunks: [], toolCount: 0,
-                    elapsed: 0, sessionFile: makeSubagentSessionFile(id), turnCount: 1,
-                };
-                agents.set(id, state);
-                updateSubWidgets();
-                spawnSubagent(state, task, ctx).catch(() => {});
-            } catch (err: any) {
-                ctx.ui.notify(`Subagent error: ${err?.message || err}`, "error");
-            }
-        },
-    });
-
-    pi.registerCommand("subcont", {
-        description: "Continue a subagent's conversation: /subcont <id> <prompt>",
-        handler: async (args, ctx) => {
-            widgetCtx = ctx;
-            const trimmed = args?.trim() ?? "";
-            const spaceIdx = trimmed.indexOf(" ");
-            if (spaceIdx === -1) { ctx.ui.notify("Usage: /subcont <id> <prompt>", "error"); return; }
-
-            const num = parseInt(trimmed.slice(0, spaceIdx), 10);
-            const prompt = trimmed.slice(spaceIdx + 1).trim();
-            if (isNaN(num) || !prompt) { ctx.ui.notify("Usage: /subcont <id> <prompt>", "error"); return; }
-
-            const state = agents.get(num);
-            if (!state) { ctx.ui.notify(`No subagent #${num} found.`, "error"); return; }
-            if (state.status === "running") { ctx.ui.notify(`Subagent #${num} is still running.`, "warning"); return; }
-
-            state.status = "running"; state.task = prompt;
-            state.textChunks = []; state.elapsed = 0; state.turnCount++;
-            updateSubWidgets();
-            ctx.ui.notify(`Continuing Subagent #${num} (Turn ${state.turnCount})…`, "info");
-            spawnSubagent(state, prompt, ctx).catch(() => {});
-        },
-    });
-
-    pi.registerCommand("subrm", {
-        description: "Remove a subagent widget: /subrm <id>",
-        handler: async (args, ctx) => {
-            widgetCtx = ctx;
-            const num = parseInt(args?.trim() ?? "", 10);
-            if (isNaN(num)) { ctx.ui.notify("Usage: /subrm <id>", "error"); return; }
-
-            const state = agents.get(num);
-            if (!state) { ctx.ui.notify(`No subagent #${num} found.`, "error"); return; }
-            if (state.proc && state.status === "running") {
-                state.proc.kill("SIGTERM");
-                ctx.ui.notify(`Subagent #${num} killed and removed.`, "warning");
-            } else {
-                ctx.ui.notify(`Subagent #${num} removed.`, "info");
-            }
-            ctx.ui.setWidget(`sub-${num}`, undefined);
-            agents.delete(num);
-        },
-    });
-
-    pi.registerCommand("subclear", {
-        description: "Clear all subagent widgets",
-        handler: async (_args, ctx) => {
-            widgetCtx = ctx;
-            let killed = 0;
-            for (const [id, state] of Array.from(agents.entries())) {
-                if (state.proc && state.status === "running") { state.proc.kill("SIGTERM"); killed++; }
-                ctx.ui.setWidget(`sub-${id}`, undefined);
-            }
-            const total = agents.size;
-            agents.clear(); nextId = 1;
-            ctx.ui.notify(
-                total === 0 ? "No subagents to clear."
-                    : `Cleared ${total} subagent${total !== 1 ? "s" : ""}${killed > 0 ? ` (${killed} killed)` : ""}.`,
-                "info"
-            );
-        },
-    });
-
-    pi.registerCommand("sublist", {
-        description: "List all subagents and their status",
-        handler: async (_args, ctx) => {
-            widgetCtx = ctx;
-            if (agents.size === 0) { ctx.ui.notify("No active subagents.", "info"); return; }
-            const list = Array.from(agents.values())
-                .map(s => `#${s.id} [${s.status.toUpperCase()}]${s.turnCount > 1 ? ` Turn ${s.turnCount}` : ""} — ${s.task}`)
-                .join("\n");
-            ctx.ui.notify(`Subagents:\n${list}`, "info");
         },
     });
 
@@ -1430,18 +1165,12 @@ ${catalog}
         const discoveredBaseTools = pi.getActiveTools().filter(name => !orchestratorToolNames.has(name));
         if (discoveredBaseTools.length > 0 || baseTools.length === 0) baseTools = discoveredBaseTools;
 
-        // Kill running subagents, clear all widgets
-        for (const [id, state] of Array.from(agents.entries())) {
-            if (state.proc && state.status === "running") state.proc.kill("SIGTERM");
-            ctx.ui.setWidget(`sub-${id}`, undefined);
-        }
-        agents.clear(); nextId = 1;
         ctx.ui.setWidget("agent-team", undefined);
         ctx.ui.setWidget("agent-chain", undefined);
 
         const cwd = (ctx as any).cwd;
 
-        // Wipe session files (each in their own subdir now)
+        // Wipe session files
         for (const subdir of ["team", "chain"]) {
             const dir = path.join(cwd, ".pi", "agent-sessions", subdir);
             if (fs.existsSync(dir)) {
@@ -1451,19 +1180,15 @@ ${catalog}
             }
         }
 
-        // Load all data
         loadTeamData(cwd);
         loadChainData(cwd);
 
-        // Restore saved preferences
         const prefs = loadPrefs();
         mode = prefs.mode;
 
-        // Activate team (saved or first available)
         const teamToActivate = (prefs.activeTeam && teams[prefs.activeTeam]) ? prefs.activeTeam : Object.keys(teams)[0];
         if (teamToActivate) activateTeam(teamToActivate);
 
-        // Activate chain (saved or first available)
         pendingReset = true;
         const chainToActivate = prefs.activeChain
             ? chains.find(c => c.name === prefs.activeChain)
@@ -1479,8 +1204,7 @@ ${catalog}
 
         ctx.ui.notify(
             `Agent Orchestrator · mode: ${mode}\n\n` +
-            `/mode [subagent|team|chain|status]\n\n` +
-            `subagent: /sub  /subcont  /subrm  /subclear  /sublist\n` +
+            `/mode [team|chain|status]\n\n` +
             `team (${teamSummary}): /team  /team-list  /agents-grid\n` +
             `chain (${chainSummary}): /chain  /chain-list  /chain-run`,
             "info"

@@ -31,6 +31,7 @@
       "./extensions/zed/index.ts",
       "./extensions/obsidian/index.ts",
       "./extensions/orchestrator/index.ts",
+      "./extensions/subagents/index.ts",
       "./extensions/pi-ui/index.ts"
     ],
     "themes": [
