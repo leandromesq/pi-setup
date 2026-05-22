@@ -1,10 +1,13 @@
 /**
  * Agent Orchestrator — Team dispatch and chain pipeline
  *
- * Two orchestration modes, switch with /mode:
+ * Three orchestration modes, switch with /mode:
  *
- *   team (default)
- *     Dispatcher-only orchestrator — main agent has NO codebase tools.
+ *   standard (default)
+ *     Normal Pi agent — all default codebase tools are available.
+ *
+ *   team
+ *     Dispatcher-only orchestrator — main agent has NO codebase write/edit tools.
  *     Agent .md files: ~/.pi/agent/agents/  or  agents/  .claude/agents/  .pi/agents/  in cwd
  *     Teams: ~/.pi/agent/agents/teams.yaml  (merged with .pi/agents/teams.yaml per project)
  *     Tool: dispatch_agent
@@ -80,7 +83,7 @@ function getSpawnOptions(childEnv?: NodeJS.ProcessEnv): any {
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
-type OrchestratorMode = "team" | "chain";
+type OrchestratorMode = "standard" | "team" | "chain";
 
 interface OrchestratorPrefs {
     mode: OrchestratorMode;
@@ -137,9 +140,9 @@ function loadPrefs(): OrchestratorPrefs {
     try {
         const raw = fs.readFileSync(PREFS_FILE, "utf-8");
         const data = JSON.parse(raw);
-        if (["team", "chain"].includes(data.mode)) return data as OrchestratorPrefs;
+        if (["standard", "team", "chain"].includes(data.mode)) return data as OrchestratorPrefs;
     } catch {}
-    return { mode: "team" };
+    return { mode: "standard" };
 }
 
 function savePrefs(prefs: OrchestratorPrefs) {
@@ -258,7 +261,7 @@ function parseChainYaml(raw: string): ChainDef[] {
 export default function (pi: ExtensionAPI) {
 
     // ── Global state ──────────────────────────────────────────────────────────
-    let mode: OrchestratorMode = "team";
+    let mode: OrchestratorMode = "standard";
     let widgetCtx: any;
     let baseTools: string[] = [];
     const orchestratorToolNames = new Set(["dispatch_agent", "run_chain"]);
@@ -455,7 +458,8 @@ export default function (pi: ExtensionAPI) {
         if (!ctx) return;
         let modeLabel: string;
         if (mode === "chain") modeLabel = `chain:${activeChain?.name || "no-chain"}`;
-        else modeLabel = `team:${activeTeamName || "no-team"}`;
+        else if (mode === "team") modeLabel = `team:${activeTeamName || "no-team"}`;
+        else modeLabel = "standard";
 
         (globalThis as any).__piOrchestratorModeTitle = modeLabel;
         ctx.ui.requestRender?.();
@@ -832,6 +836,7 @@ export default function (pi: ExtensionAPI) {
     }
 
     function activeToolsForMode(): string[] {
+        if (mode === "standard") return Array.from(new Set(baseTools));
         if (mode === "team") return Array.from(new Set([...readSearchTools(), "dispatch_agent"]));
         return Array.from(new Set([...baseTools, "run_chain"]));
     }
@@ -842,7 +847,9 @@ export default function (pi: ExtensionAPI) {
         ctx.ui.setWidget("agent-team", undefined);
         ctx.ui.setWidget("agent-chain", undefined);
 
-        if (mode === "team") {
+        if (mode === "standard") {
+            ctx.ui.setStatus("orchestrator", "Mode: standard");
+        } else if (mode === "team") {
             updateTeamWidget();
             ctx.ui.setStatus("orchestrator", `Mode: team · ${activeTeamName} (${agentStates.size})`);
         } else {
@@ -947,8 +954,9 @@ export default function (pi: ExtensionAPI) {
             }
 
             if (!newMode) {
-                const modeValues: OrchestratorMode[] = ["team", "chain"];
+                const modeValues: OrchestratorMode[] = ["standard", "team", "chain"];
                 const optionLabels = modeValues.map(value => {
+                    if (value === "standard") return `standard${mode === value ? " ◀ current" : ""} — normal Pi agent with default tools`;
                     if (value === "team") return `team${mode === value ? " ◀ current" : ""} — dispatcher with specialist agent grid (${activeTeamName || Object.keys(teams).length + " teams"})`;
                     return `chain${mode === value ? " ◀ current" : ""} — sequential pipeline (${activeChain?.name || chains.length + " chains"})`;
                 });
@@ -957,8 +965,8 @@ export default function (pi: ExtensionAPI) {
                 newMode = modeValues[optionLabels.indexOf(choice)];
             }
 
-            if (!["team", "chain"].includes(newMode)) {
-                ctx.ui.notify("Invalid mode. Use: team or chain", "error"); return;
+            if (!["standard", "team", "chain"].includes(newMode)) {
+                ctx.ui.notify("Invalid mode. Use: standard, team, or chain", "error"); return;
             }
             if (newMode === mode) { ctx.ui.notify(`Already in ${mode} mode`, "info"); return; }
 
@@ -1204,7 +1212,8 @@ ${catalog}
 
         ctx.ui.notify(
             `Agent Orchestrator · mode: ${mode}\n\n` +
-            `/mode [team|chain|status]\n\n` +
+            `/mode [standard|team|chain|status]\n\n` +
+            `standard: normal Pi agent with default read/write/edit/bash tools\n` +
             `team (${teamSummary}): /team  /team-list  /agents-grid\n` +
             `chain (${chainSummary}): /chain  /chain-list  /chain-run`,
             "info"
