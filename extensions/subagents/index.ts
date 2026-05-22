@@ -37,6 +37,11 @@ export interface AgentConfig {
      * `undefined` means no restriction (child sees every registered agent).
      */
     subagentAgents?: string[];
+    /**
+     * Fallback model to use when the primary model returns a rate-limit error.
+     * Retried once automatically.
+     */
+    fallbackModel?: string;
 }
 
 interface ToolEvent {
@@ -180,6 +185,7 @@ function loadAgents(): AgentConfig[] {
         const subagentAgents = rawSubagentAgents
             ? rawSubagentAgents.split(",").map((t) => t.trim()).filter(Boolean)
             : undefined;
+        const fallbackModel = (frontmatter as Record<string, string>).fallback_model?.trim() || undefined;
         result.push({
             name: frontmatter.name,
             description: frontmatter.description || "",
@@ -189,6 +195,7 @@ function loadAgents(): AgentConfig[] {
             systemPrompt: body,
             filePath,
             subagentAgents,
+            fallbackModel,
         });
     }
     return result;
@@ -527,6 +534,13 @@ async function runSubagent(
     return result;
 }
 
+// ── Rate-limit detection ──────────────────────────────────────────────────────
+
+function isRateLimitError(error: string | undefined): boolean {
+    if (!error) return false;
+    return /429|rate.?limit|too many requests|quota exceeded/i.test(error);
+}
+
 // ── Throttle ───────────────────────────────────────────────────────────────────
 
 function throttle<T extends (...args: any[]) => void>(fn: T, ms: number): T {
@@ -743,7 +757,7 @@ export default function (pi: ExtensionAPI) {
                 },
             };
 
-            const result = await semaphore.run(() =>
+            let result = await semaphore.run(() =>
                 runSubagent(agent, params.task!, params.cwd ?? cwd, signal, (progress, usage) => {
                     liveResult.progress = progress;
                     liveResult.usage = { ...usage };
@@ -753,6 +767,36 @@ export default function (pi: ExtensionAPI) {
                     });
                 }),
             );
+
+            // Fallback model retry on rate limit
+            if (result.exitCode !== 0 && agent.fallbackModel && isRateLimitError(result.progress.error)) {
+                const fallbackAgent = { ...agent, model: agent.fallbackModel };
+                liveResult.model = agent.fallbackModel;
+                liveResult.progress = {
+                    ...liveResult.progress,
+                    status: "running" as const,
+                    error: undefined,
+                    recentTools: [],
+                    toolCount: 0,
+                    tokens: 0,
+                    durationMs: 0,
+                    lastMessage: `Rate limited on ${agent.model}, retrying with ${agent.fallbackModel}…`,
+                };
+                onUpdate?.({
+                    content: [{ type: "text", text: `(rate limited, retrying with ${agent.fallbackModel}…)` }],
+                    details: { results: [liveResult] },
+                });
+                result = await semaphore.run(() =>
+                    runSubagent(fallbackAgent, params.task!, params.cwd ?? cwd, signal, (progress, usage) => {
+                        liveResult.progress = progress;
+                        liveResult.usage = { ...usage };
+                        onUpdate?.({
+                            content: [{ type: "text", text: "(running...)" }],
+                            details: { results: [liveResult] },
+                        });
+                    }),
+                );
+            }
 
             result.contextWindow = contextWindow;
             const isError = result.exitCode !== 0 || !!result.progress.error;
