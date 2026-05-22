@@ -1,7 +1,8 @@
 /**
  * Minimal subagents extension.
  *
- * Registers a single `subagent` tool with three agents: scout, researcher, worker.
+ * Registers a single `subagent` tool. Agent definitions are loaded from the
+ * shared Pi user agents directory: ~/.pi/agent/agents.
  * Supports single and parallel execution. Output is verbal only (no file handoff).
  */
 import { spawn } from "node:child_process";
@@ -105,7 +106,7 @@ interface ExtensionConfig {
 }
 
 const EXT_DIR = path.dirname(new URL(import.meta.url).pathname);
-const AGENTS_DIR = path.join(EXT_DIR, "agents");
+const AGENTS_DIR = path.join(os.homedir(), ".pi", "agent", "agents");
 const TOOLS_DIR = path.join(EXT_DIR, "tools");
 const CONFIG_PATH = path.join(EXT_DIR, "config.json");
 const DEFAULT_MAX_CONCURRENCY = 4;
