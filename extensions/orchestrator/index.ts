@@ -28,7 +28,7 @@
 
 import { spawn } from "node:child_process";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { Container, Text, type AutocompleteItem, truncateToWidth, visibleWidth } from "@earendil-works/pi-tui";
+import { Container, Text, type AutocompleteItem, visibleWidth } from "@earendil-works/pi-tui";
 import { Type } from "typebox";
 import * as fs from "fs";
 import * as os from "os";

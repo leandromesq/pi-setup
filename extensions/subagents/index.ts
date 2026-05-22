@@ -298,7 +298,7 @@ async function buildPiArgs(
         args.push("--extension", extPath);
     }
 
-    args.push("--models", agent.model);
+    args.push("--model", agent.model);
     args.push("--thinking", agent.thinking);
     args.push("--append-system-prompt", promptPath);
 
