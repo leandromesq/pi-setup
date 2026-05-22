@@ -562,15 +562,26 @@ async function flutterRun(args) {
   const target = args.target || args.lib || "lib/main.dart";
   const flavor = args.flavor || "";
   const dartDefine = args.dart_define || "";
+  const webMode = args.web_mode || "";
+  const webPort = args.web_port || "";
+  const webHostname = args.web_hostname || "";
+  const webBrowserFlag = args.web_browser_flag || "";
+  const envVars = args.env || {};
 
   const cmdArgs = ["run"];
   if (device) cmdArgs.push("-d", device);
   if (target) cmdArgs.push("-t", target);
   if (flavor) cmdArgs.push("--flavor", flavor);
+  if (webMode) cmdArgs.push(`--web-mode=${webMode}`);
+  if (webPort) cmdArgs.push(`--web-port=${webPort}`);
+  if (webHostname) cmdArgs.push(`--web-hostname=${webHostname}`);
+  if (webBrowserFlag) cmdArgs.push(`--web-browser-flag=${webBrowserFlag}`);
   if (dartDefine) {
     const defines = Array.isArray(dartDefine) ? dartDefine : [dartDefine];
     for (const d of defines) cmdArgs.push("--dart-define", String(d));
   }
+
+  const spawnEnv = { ...process.env, ...envVars };
 
   flutterOutput = "";
   flutterReady = false;
@@ -579,7 +590,7 @@ async function flutterRun(args) {
     cwd: projectCwd,
     stdio: ["pipe", "pipe", "pipe"],
     shell: process.platform === "win32",
-    env: { ...process.env },
+    env: spawnEnv,
   });
 
   flutterProc = proc;
@@ -875,7 +886,7 @@ const TOOLS = [
   },
   {
     name: "flutter_run",
-    description: "Start the Flutter app with `flutter run`. Launches the app on a device/emulator and keeps it running in the background. Once running, use flutter_hot_reload (r) and flutter_hot_restart (R) for instant updates. Use flutter_stop to quit.",
+    description: "Start the Flutter app with `flutter run`. Launches the app on a device/emulator and keeps it running in the background. Once running, use flutter_hot_reload (r) and flutter_hot_restart (R) for instant updates. Use flutter_stop to quit. For web: set device=chrome, or use web_mode=web-server to serve without a specific browser (open manually in any browser including Helium).",
     inputSchema: {
       type: "object",
       properties: {
@@ -883,6 +894,11 @@ const TOOLS = [
         target: { type: "string", description: "Main entry point file (default: lib/main.dart)" },
         flavor: { type: "string", description: "Build flavor to use" },
         dart_define: { type: "array", items: { type: "string" }, description: "Dart define values (e.g., environment=staging)" },
+        web_mode: { type: "string", description: "Web rendering mode: \"web-server\" to serve without launching a browser (open manually in Helium or any browser)" },
+        web_port: { type: "string", description: "Port for web-server mode (default: random)" },
+        web_hostname: { type: "string", description: "Hostname for web-server mode (default: localhost)" },
+        web_browser_flag: { type: "string", description: "Additional Chrome/Chromium flag to pass to the browser (e.g., --remote-debugging-port=9222)" },
+        env: { type: "object", description: "Extra environment variables to pass to Flutter (e.g., { CHROME_EXECUTABLE: '/path/to/helium' }). Merged with current env." },
       },
     },
   },
