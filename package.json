@@ -31,7 +31,8 @@
       "./extensions/zed/index.ts",
       "./extensions/obsidian/index.ts",
       "./extensions/orchestrator/index.ts",
-      "./extensions/pi-ui/index.ts"
+      "./extensions/pi-ui/index.ts",
+      "./extensions/mcp/index.ts"
     ],
     "themes": [
       "./themes/github-dark-default.json"
