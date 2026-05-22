@@ -563,23 +563,14 @@ async function flutterRun(args) {
   const flavor = args.flavor || "";
   const dartDefine = args.dart_define || "";
 
-  // When CHROME_EXECUTABLE points to Helium (privacy browser), default to
-  // web-server mode since Helium blocks the Chrome DevTools debugging protocol.
-  const chromeExe = (process.env.CHROME_EXECUTABLE || "").toLowerCase();
-  const isHelium = chromeExe.includes("helium") || chromeExe.includes("imput");
-  const defaultWebMode = isHelium ? "web-server" : "";
-
-  const webMode = args.web_mode || defaultWebMode;
+  const webMode = args.web_mode || "";
   const webPort = args.web_port || "";
   const webHostname = args.web_hostname || "";
   const webBrowserFlag = args.web_browser_flag || "";
   const envVars = args.env || {};
 
-  // Auto-select web-server device when in web-server mode
-  const effectiveDevice = device || (webMode === "web-server" ? "web-server" : "");
-
   const cmdArgs = ["run"];
-  if (effectiveDevice) cmdArgs.push("-d", effectiveDevice);
+  if (device) cmdArgs.push("-d", device);
   if (target) cmdArgs.push("-t", target);
   if (flavor) cmdArgs.push("--flavor", flavor);
   if (webMode) cmdArgs.push(`--web-mode=${webMode}`);
