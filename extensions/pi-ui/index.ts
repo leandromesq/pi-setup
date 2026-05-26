@@ -8,22 +8,21 @@ const RESET = "\x1b[0m";
 const BOLD = "\x1b[1m";
 const PI_LOGO = "⡯⢣"; // 4x4 braille rasterisation of the official Pi SVG mark.
 
-const DEEP_BLUE: Rgb = [31, 111, 235];
-const BLUE: Rgb = [56, 139, 253];
-const SKY: Rgb = [121, 192, 255];
-const ICE: Rgb = [165, 214, 255];
+const DEEP_BLUE: Rgb = [59, 130, 246];
+const BLUE: Rgb = [34, 211, 238];
+const SKY: Rgb = [168, 85, 247];
+const ICE: Rgb = [236, 72, 153];
 const PALETTE: Rgb[] = [DEEP_BLUE, BLUE, SKY, ICE, SKY, BLUE];
 
 type Rgb = [number, number, number];
 type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | string;
 
 const TITLE_LINES = [
-  "  ███████████████╗ ",
-  "  ╚════███╔══███╔╝ ",
-  "      ███║  ███║  ",
-  "      ███║  ███║  ",
-  "      ███║  ███║  ",
-  "      ╚══╝  ╚══╝  ",
+  "▀████████████▀",
+  " ╘███    ███  ",
+  "  ███    ███  ",
+  "  ███    ███  ",
+  " ▄███▄  ▄███▄ ",
 ];
 
 function mix(a: number, b: number, t: number) {
