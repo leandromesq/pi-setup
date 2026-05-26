@@ -32,10 +32,16 @@
       "./extensions/obsidian/index.ts",
       "./extensions/orchestrator/index.ts",
       "./extensions/subagents/index.ts",
+      "./extensions/theme-cycler/index.ts",
       "./extensions/pi-ui/index.ts"
     ],
     "themes": [
-      "./themes/github-dark-default.json"
+      "./themes/github-dark-default.json",
+      "./themes/pi-electric-aurora.json",
+      "./themes/pi-ocean-glass.json",
+      "./themes/pi-synthwave.json",
+      "./themes/pi-terminal-emerald.json",
+      "./themes/pi-royal.json"
     ]
   },
   "peerDependencies": {
