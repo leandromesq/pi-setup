@@ -14,6 +14,15 @@ const SKY: Rgb = [168, 85, 247];
 const ICE: Rgb = [236, 72, 153];
 const PALETTE: Rgb[] = [DEEP_BLUE, BLUE, SKY, ICE, SKY, BLUE];
 
+const THEME_PALETTES: Record<string, Rgb[]> = {
+  "github-dark-default": [[31, 111, 235], [56, 139, 253], [121, 192, 255], [165, 214, 255], [121, 192, 255], [56, 139, 253]],
+  "pi-electric-aurora": PALETTE,
+  "pi-ocean-glass": [[2, 132, 199], [56, 189, 248], [165, 243, 252], [186, 230, 253], [125, 211, 252], [45, 212, 191]],
+  "pi-synthwave": [[124, 58, 237], [217, 70, 239], [244, 114, 182], [251, 146, 60], [250, 204, 21], [34, 211, 238]],
+  "pi-terminal-emerald": [[5, 150, 105], [16, 185, 129], [52, 211, 153], [94, 234, 212], [187, 247, 208], [45, 212, 191]],
+  "pi-royal": [[67, 56, 202], [124, 58, 237], [139, 92, 246], [196, 181, 253], [147, 197, 253], [240, 171, 252]],
+};
+
 type Rgb = [number, number, number];
 type ThinkingLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | string;
 
@@ -29,14 +38,18 @@ function mix(a: number, b: number, t: number) {
   return Math.round(a + (b - a) * t);
 }
 
-function sampleGradient(position: number) {
+function paletteForTheme(themeName: string | undefined) {
+  return THEME_PALETTES[themeName ?? ""] ?? PALETTE;
+}
+
+function sampleGradient(position: number, palette: Rgb[]) {
   const wrapped = ((position % 1) + 1) % 1;
-  const scaled = wrapped * PALETTE.length;
+  const scaled = wrapped * palette.length;
   const index = Math.floor(scaled);
-  const nextIndex = (index + 1) % PALETTE.length;
+  const nextIndex = (index + 1) % palette.length;
   const t = scaled - index;
-  const a = PALETTE[index]!;
-  const b = PALETTE[nextIndex]!;
+  const a = palette[index]!;
+  const b = palette[nextIndex]!;
   return [mix(a[0], b[0], t), mix(a[1], b[1], t), mix(a[2], b[2], t)] as Rgb;
 }
 
@@ -44,11 +57,11 @@ function fg([r, g, b]: Rgb, text: string) {
   return `\x1b[38;2;${r};${g};${b}m${text}${RESET}`;
 }
 
-function gradientText(text: string, phase: number) {
+function gradientText(text: string, phase: number, palette = PALETTE) {
   const chars = [...text];
   const span = Math.max(chars.length - 1, 1);
   return chars
-    .map((char, index) => (char === " " ? char : fg(sampleGradient(index / span + phase), char)))
+    .map((char, index) => (char === " " ? char : fg(sampleGradient(index / span + phase, palette), char)))
     .join("");
 }
 
@@ -163,7 +176,7 @@ function padVisible(text: string, width: number) {
   return `${text}${" ".repeat(width - length)}`;
 }
 
-function headerShortcutBox(width: number) {
+function headerShortcutBox(width: number, palette = PALETTE) {
   const shortcuts = [
     ["Ctrl+L", "model"],
     ["⇧Tab", "thinking"],
@@ -176,11 +189,11 @@ function headerShortcutBox(width: number) {
   ];
 
   const innerWidth = Math.max(12, width - 2);
-  const title = `${BOLD}${fg(SKY, "shortcuts")}${RESET}`;
+  const title = `${BOLD}${fg(palette[2] ?? SKY, "shortcuts")}${RESET}`;
   const rows = shortcuts.slice(0, 4).map(([key, label], index) => {
     const next = shortcuts[index + 4];
-    const left = `${fg(ICE, key)} ${fg([110, 118, 129], label)}`;
-    const right = next ? `${fg(ICE, next[0])} ${fg([110, 118, 129], next[1])}` : "";
+    const left = `${fg(palette[3] ?? ICE, key)} ${fg([110, 118, 129], label)}`;
+    const right = next ? `${fg(palette[3] ?? ICE, next[0])} ${fg([110, 118, 129], next[1])}` : "";
     const gap = Math.max(2, innerWidth - visibleWidth(left) - visibleWidth(right));
     return `│${padVisible(`${left}${" ".repeat(gap)}${right}`, innerWidth)}│`;
   });
@@ -193,7 +206,7 @@ function headerShortcutBox(width: number) {
   ];
 }
 
-function renderHeader(width: number, phase: number, subtitleText: string) {
+function renderHeader(width: number, phase: number, subtitleText: string, palette = PALETTE) {
   const logoWidth = Math.max(...TITLE_LINES.map((line) => visibleWidth(line)));
   const leftMargin = width >= 80 ? 2 : 0;
   const gap = 3;
@@ -205,15 +218,15 @@ function renderHeader(width: number, phase: number, subtitleText: string) {
   const logoInset = Math.max(0, Math.floor((logoBlockWidth - logoWidth) / 2));
   const canShowBox = width >= leftMargin + logoBlockWidth + gap + 24;
   const logoLines = [
-    ...TITLE_LINES.map((line, row) => gradientText(padVisible(`${" ".repeat(logoInset)}${line}`, logoBlockWidth), phase + row * 0.045)),
-    `${BOLD}${gradientText(padVisible(truncateToWidth(`  ${subtitleText}`, logoBlockWidth, "…"), logoBlockWidth), phase + 0.18)}${RESET}`,
+    ...TITLE_LINES.map((line, row) => gradientText(padVisible(`${" ".repeat(logoInset)}${line}`, logoBlockWidth), phase + row * 0.045, palette)),
+    `${BOLD}${gradientText(padVisible(truncateToWidth(`  ${subtitleText}`, logoBlockWidth, "…"), logoBlockWidth), phase + 0.18, palette)}${RESET}`,
   ];
 
   const prefix = " ".repeat(leftMargin);
   if (!canShowBox) return ["", ...logoLines.map((line) => truncateToWidth(`${prefix}${line}`, width, "")), ""];
 
   const boxWidth = Math.min(maxBoxWidth, Math.max(minBoxWidth, width - leftMargin - logoBlockWidth - gap));
-  const boxLines = headerShortcutBox(boxWidth);
+  const boxLines = headerShortcutBox(boxWidth, palette);
   const rows = Math.max(logoLines.length, boxLines.length);
   const lines = [];
   for (let i = 0; i < rows; i++) {
@@ -261,7 +274,7 @@ export default function (pi: ExtensionAPI) {
       requestHeaderRender = () => tui.requestRender();
       return {
         render(width: number) {
-          return renderHeader(width, 0, `${formatModel(currentModelId)} · ${projectName(ctx.cwd)}`);
+          return renderHeader(width, 0, `${formatModel(currentModelId)} · ${projectName(ctx.cwd)}`, paletteForTheme(ctx.ui.theme.name));
         },
         invalidate() {
           tui.requestRender();
