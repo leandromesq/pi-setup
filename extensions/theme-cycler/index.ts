@@ -80,12 +80,12 @@ export default function (pi: ExtensionAPI) {
     if (setTheme(ctx, theme.name)) ctx.ui.notify(`${theme.name} (${index + 1}/${themes.length})`, "info");
   }
 
-  pi.registerShortcut("alt+t", {
+  pi.registerShortcut("ctrl+shift+.", {
     description: "Cycle theme forward",
     handler: async (ctx) => cycleTheme(ctx, 1),
   });
 
-  pi.registerShortcut("alt+shift+t", {
+  pi.registerShortcut("ctrl+shift+,", {
     description: "Cycle theme backward",
     handler: async (ctx) => cycleTheme(ctx, -1),
   });
