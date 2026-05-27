@@ -91,25 +91,6 @@ Commands and flags:
 - `/update` — update Pi using the detected install method.
 - `--update` — queue `/update` automatically at session start.
 
-### `obsidian`
-
-Adds a simple Obsidian workflow for searching, opening, removing, editing, and model-formatting notes. Notes use one standard format: YAML `date` property plus a `YYYY-MM-DD HH:mm - Title` heading. Content is formatted in Brazilian Portuguese while preserving the user's wording as much as possible.
-
-Config:
-
-- `~/.pi/obsidian.json` — stores `vaultPath`, `vaultName`, `defaultNotesDir`, and `language`.
-
-Commands:
-
-- `/ob-config` — show or update Obsidian config.
-- `/ob-config test` — validate the configured vault.
-- `/ob-search <term>` — search notes by filename and contents.
-- `/ob-open [term]` — search/select/open a note and set it as current.
-- `/ob-remove [term]` — search/select/remove a note after confirmation.
-- `/ob-edit-start [term|title]` — select an existing note or create a new current note; normal messages append to it.
-- `/ob-edit-stop` — stop appending messages to the current note.
-- `/ob-format` — format the current note using the model.
-
 ### `pwsh-user-bash`
 
 Replaces Pi's user `!` shell backend with PowerShell 7 on Windows-oriented setups. It runs `pwsh` directly, avoids the local Git Bash wrapper, keeps startup non-interactive, and optionally sources a dedicated Pi profile before each command.
@@ -180,4 +161,6 @@ The `npx` bootstrap also adds these packages to `~/.pi/agent/settings.json`:
 
 - `npm:pi-hermes-memory`
 - `npm:pi-extmgr`
+- `npm:pi-lens` - real-time code feedback with LSP, linters, formatters, type-checking, and Dart/Flutter support via Dart LSP, `dart analyze`, and `dart format` when the Dart/Flutter SDK is on `PATH`.
+- `npm:pi-simplify` - reviews recently changed code for clarity, consistency, and maintainability.
 - `git:github.com/leandromesq/pi-setup`

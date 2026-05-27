@@ -29,7 +29,6 @@
       "./extensions/yeet/index.ts",
       "./extensions/diff/index.ts",
       "./extensions/zed/index.ts",
-      "./extensions/obsidian/index.ts",
       "./extensions/orchestrator/index.ts",
       "./extensions/subagents/index.ts",
       "./extensions/theme-cycler/index.ts",

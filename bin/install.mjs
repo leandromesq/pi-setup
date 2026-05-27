@@ -24,7 +24,7 @@ await mkdir(agentDir, { recursive: true });
 
 const settings = await readJson(settingsPath, {});
 settings.packages = Array.isArray(settings.packages) ? settings.packages : [];
-for (const pkg of ['npm:pi-hermes-memory', 'npm:pi-extmgr', source]) {
+for (const pkg of ['npm:pi-hermes-memory', 'npm:pi-extmgr', 'npm:pi-lens', 'npm:pi-simplify', source]) {
   if (!settings.packages.includes(pkg)) settings.packages.push(pkg);
 }
 settings.retry = settings.retry ?? { enabled: true };
