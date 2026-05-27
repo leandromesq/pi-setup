@@ -103,8 +103,8 @@ function providerLogo(providerId: string | undefined) {
   return "◆";
 }
 
-function renderPiLogo() {
-  return `${fg(DEEP_BLUE, PI_LOGO[0] ?? "")}${fg(SKY, PI_LOGO[1] ?? "")}`;
+function renderPiLogo(palette = PALETTE) {
+  return `${fg(palette[0] ?? DEEP_BLUE, PI_LOGO[0] ?? "")}${fg(palette[2] ?? SKY, PI_LOGO[1] ?? "")}`;
 }
 
 function contextMeterIcon(percent: number | null | undefined) {
@@ -291,8 +291,9 @@ export default function (pi: ExtensionAPI) {
     const contextTheme = contextColor(usage?.percent);
 
     const sep = theme.fg("dim", "›");
+    const palette = paletteForTheme(ctx.ui.theme.name);
     const leftSegments = [
-      renderPiLogo(),
+      renderPiLogo(palette),
       `${theme.fg("accent", providerLogo(currentProviderId))} ${theme.fg("muted", formatModel(currentModelId))}`,
       theme.fg(thinkingColor(currentThinking) as any, currentThinking),
       formatPathSegment(ctx.cwd, theme),
