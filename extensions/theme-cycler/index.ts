@@ -9,6 +9,14 @@ export default function (pi: ExtensionAPI) {
     ctx.ui.setStatus("theme", `🎨 ${ctx.ui.theme.name}`);
   }
 
+  function safeFg(theme: any, color: string, text: string) {
+    try {
+      return theme.fg(color, text);
+    } catch {
+      return text;
+    }
+  }
+
   function showSwatch(ctx: ExtensionContext) {
     if (!ctx.hasUI) return;
     if (swatchTimer) clearTimeout(swatchTimer);
@@ -19,11 +27,11 @@ export default function (pi: ExtensionAPI) {
         invalidate() {},
         render(width: number): string[] {
           const block = "███";
-          const swatch = ["success", "accent", "warning", "purple", "cyan", "muted"]
-            .map((color) => theme.fg(color as any, block))
+          const swatch = ["success", "accent", "warning", "thinkingHigh", "thinkingMedium", "muted"]
+            .map((color) => safeFg(theme, color, block))
             .join(" ");
-          const label = `${theme.fg("accent", " 🎨 ")}${theme.fg("text", ctx.ui.theme.name)}  ${swatch}`;
-          const border = theme.fg("borderMuted", "─".repeat(Math.max(0, width)));
+          const label = `${safeFg(theme, "accent", " 🎨 ")}${safeFg(theme, "text", ctx.ui.theme.name)}  ${swatch}`;
+          const border = safeFg(theme, "borderMuted", "─".repeat(Math.max(0, width)));
           return [border, truncateToWidth(` ${label}`, width), border];
         },
       }),
