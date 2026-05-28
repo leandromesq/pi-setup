@@ -97,7 +97,7 @@ export default function (pi: ExtensionAPI) {
       ctx.ui.notify(`${theme.name} (${index + 1}/${themes.length})`, "info");
   }
 
-  pi.registerShortcut("ctrl+shift+X", {
+  pi.registerShortcut("ctrl+shift+U", {
     description: "Cycle theme forward",
     handler: async (ctx) => cycleTheme(ctx, 1),
   });
