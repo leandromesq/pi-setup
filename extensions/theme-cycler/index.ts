@@ -1,4 +1,7 @@
-import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import type {
+  ExtensionAPI,
+  ExtensionContext,
+} from "@earendil-works/pi-coding-agent";
 import { truncateToWidth } from "@earendil-works/pi-tui";
 
 export default function (pi: ExtensionAPI) {
@@ -27,11 +30,22 @@ export default function (pi: ExtensionAPI) {
         invalidate() {},
         render(width: number): string[] {
           const block = "███";
-          const swatch = ["success", "accent", "warning", "thinkingHigh", "thinkingMedium", "muted"]
+          const swatch = [
+            "success",
+            "accent",
+            "warning",
+            "thinkingHigh",
+            "thinkingMedium",
+            "muted",
+          ]
             .map((color) => safeFg(theme, color, block))
             .join(" ");
           const label = `${safeFg(theme, "accent", " 🎨 ")}${safeFg(theme, "text", ctx.ui.theme.name)}  ${swatch}`;
-          const border = safeFg(theme, "borderMuted", "─".repeat(Math.max(0, width)));
+          const border = safeFg(
+            theme,
+            "borderMuted",
+            "─".repeat(Math.max(0, width)),
+          );
           return [border, truncateToWidth(` ${label}`, width), border];
         },
       }),
@@ -49,7 +63,9 @@ export default function (pi: ExtensionAPI) {
   }
 
   function findCurrentIndex(ctx: ExtensionContext) {
-    return getThemes(ctx).findIndex((theme) => theme.name === ctx.ui.theme.name);
+    return getThemes(ctx).findIndex(
+      (theme) => theme.name === ctx.ui.theme.name,
+    );
   }
 
   function setTheme(ctx: ExtensionContext, name: string) {
@@ -77,15 +93,16 @@ export default function (pi: ExtensionAPI) {
     if (index === -1) index = 0;
     index = (index + direction + themes.length) % themes.length;
     const theme = themes[index]!;
-    if (setTheme(ctx, theme.name)) ctx.ui.notify(`${theme.name} (${index + 1}/${themes.length})`, "info");
+    if (setTheme(ctx, theme.name))
+      ctx.ui.notify(`${theme.name} (${index + 1}/${themes.length})`, "info");
   }
 
-  pi.registerShortcut("ctrl+shift+.", {
+  pi.registerShortcut("ctrl+shift+X", {
     description: "Cycle theme forward",
     handler: async (ctx) => cycleTheme(ctx, 1),
   });
 
-  pi.registerShortcut("ctrl+shift+,", {
+  pi.registerShortcut("ctrl+shift+P", {
     description: "Cycle theme backward",
     handler: async (ctx) => cycleTheme(ctx, -1),
   });
@@ -102,7 +119,9 @@ export default function (pi: ExtensionAPI) {
       const themes = getThemes(ctx);
 
       if (arg) {
-        const exact = themes.find((theme) => theme.name.toLowerCase() === arg.toLowerCase());
+        const exact = themes.find(
+          (theme) => theme.name.toLowerCase() === arg.toLowerCase(),
+        );
         setTheme(ctx, exact?.name ?? arg);
         return;
       }
