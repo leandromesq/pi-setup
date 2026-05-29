@@ -43,13 +43,13 @@ Commands:
 
 ### `orchestrator`
 
-Adds `/agent` for selecting a foreground agent and `/mode` for selecting orchestration mode (`standard`, `agent`, `team`, or `chain`). Foreground agents are normal agent `.md` files with `role: foreground` or `role: both`; they can restrict callable background subagents with `background_agents`. If no agents are marked foreground, all discovered agents are selectable so names/themes can be changed freely. `team` mode allows read/search plus specialist dispatch; `chain` mode runs repeatable pipelines.
+Adds `/agent` for selecting a foreground agent. Foreground agents are normal agent `.md` files with `role: foreground` or `role: both`; they can restrict callable background subagents with `background_agents`. If no agents are marked foreground, all discovered agents are selectable so names/themes can be changed freely. This replaces the older team/chain/mode workflow: foreground agents own the conversation, and background agents are invoked through the subagent tool.
 
 Bundled foreground agents:
 
-- `planner` — writes implementation plans under `.olympus/`.
+- `planner` — writes implementation plans under `.plans/`.
 - `worker` — everyday foreground development agent.
-- `plan-runner` — implements existing `.olympus/` plans.
+- `plan-runner` — implements existing `.plans/` plans.
 - `builder` — autonomous plan-and-implement foreground agent.
 
 Bundled background agents:
@@ -77,14 +77,8 @@ Commands:
 
 - `/agent` — pick a foreground agent.
 - `/agent <name>` — switch directly to a foreground agent.
-- `/mode` — pick an orchestration mode.
-- `/mode status` — show current mode, foreground agent, active team/chain, and tools.
-- `/team` — select a team and switch to team mode.
-- `/team-list` — list active team agents.
-- `/agents-grid <1-6>` — set team widget columns.
-- `/chain` — select a chain and switch to chain mode.
-- `/chain-list` — list available chains.
-- `/chain-run <task>` — run the active chain directly.
+- `/agent status` — show active foreground/background agents and tools.
+- `/agent off` — disable foreground agent mode and return to normal Pi tools.
 
 ### `pi-ui`
 
