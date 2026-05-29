@@ -91,6 +91,14 @@ Commands and flags:
 - `/update` — update Pi using the detected install method.
 - `--update` — queue `/update` automatically at session start.
 
+### `usage-bar`
+
+Adds an interactive `/usage` overlay with AI provider quota bars, reset countdowns, plan details, and provider status indicators for Claude, GitHub Copilot, Gemini, and Codex/OpenAI where credentials are available.
+
+Commands:
+
+- `/usage` — show usage/quota bars and provider status. Press any key to close.
+
 ### `pwsh-user-bash`
 
 Replaces Pi's user `!` shell backend with PowerShell 7 on Windows-oriented setups. It runs `pwsh` directly, avoids the local Git Bash wrapper, keeps startup non-interactive, and optionally sources a dedicated Pi profile before each command.

@@ -32,7 +32,8 @@
       "./extensions/orchestrator/index.ts",
       "./extensions/subagents/index.ts",
       "./extensions/theme-cycler/index.ts",
-      "./extensions/pi-ui/index.ts"
+      "./extensions/pi-ui/index.ts",
+      "./extensions/usage-bar/index.ts"
     ],
     "themes": [
       "./themes/github-dark-default.json",
