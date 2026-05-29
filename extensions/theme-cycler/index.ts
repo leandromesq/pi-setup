@@ -4,6 +4,9 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { truncateToWidth } from "@earendil-works/pi-tui";
 
+const DEFAULT_NEXT_SHORTCUT = "alt+]";
+const DEFAULT_PREVIOUS_SHORTCUT = "alt+[";
+
 export default function (pi: ExtensionAPI) {
   let swatchTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -97,12 +100,12 @@ export default function (pi: ExtensionAPI) {
       ctx.ui.notify(`${theme.name} (${index + 1}/${themes.length})`, "info");
   }
 
-  pi.registerShortcut("ctrl+shift+U", {
+  pi.registerShortcut(process.env.PI_THEME_NEXT_SHORTCUT ?? DEFAULT_NEXT_SHORTCUT, {
     description: "Cycle theme forward",
     handler: async (ctx) => cycleTheme(ctx, 1),
   });
 
-  pi.registerShortcut("ctrl+shift+P", {
+  pi.registerShortcut(process.env.PI_THEME_PREVIOUS_SHORTCUT ?? DEFAULT_PREVIOUS_SHORTCUT, {
     description: "Cycle theme backward",
     handler: async (ctx) => cycleTheme(ctx, -1),
   });

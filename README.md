@@ -99,6 +99,17 @@ Commands:
 
 - `/usage` — show usage/quota bars and provider status. Press any key to close.
 
+### `theme-cycler`
+
+Cycles installed themes without using Ctrl+Shift shortcuts that are commonly intercepted by Zed or terminal hosts. Override the defaults with `PI_THEME_NEXT_SHORTCUT` and `PI_THEME_PREVIOUS_SHORTCUT` if needed.
+
+Commands and shortcuts:
+
+- `/theme` — choose a theme from a picker.
+- `/theme <name>` — switch directly to a theme.
+- `Alt+]` — next theme.
+- `Alt+[` — previous theme.
+
 ### `pwsh-user-bash`
 
 Replaces Pi's user `!` shell backend with PowerShell 7 on Windows-oriented setups. It runs `pwsh` directly, avoids the local Git Bash wrapper, keeps startup non-interactive, and optionally sources a dedicated Pi profile before each command.

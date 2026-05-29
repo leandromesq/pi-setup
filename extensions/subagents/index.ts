@@ -543,6 +543,11 @@ function isRateLimitError(error: string | undefined): boolean {
     return /429|rate.?limit|too many requests|quota exceeded/i.test(error);
 }
 
+function formatFailedAgentError(result: AgentResult): string {
+    const output = result.output || result.progress.error || "No output";
+    return `[${result.agent}] failed with exit code ${result.exitCode}\n\n${output}`;
+}
+
 // ── Throttle ───────────────────────────────────────────────────────────────────
 
 function throttle<T extends (...args: any[]) => void>(fn: T, ms: number): T {
@@ -802,11 +807,11 @@ export default function (pi: ExtensionAPI) {
 
             result.contextWindow = contextWindow;
             const isError = result.exitCode !== 0 || !!result.progress.error;
+            if (isError) throw new Error(formatFailedAgentError(result));
 
             return {
                 content: [{ type: "text", text: result.output || "(no output)" }],
                 details: { results: [result] },
-                ...(isError ? { isError: true } : {}),
             };
         },
 

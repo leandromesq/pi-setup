@@ -71,7 +71,7 @@ export default function modelFavoritesExtension(pi: ExtensionAPI) {
   function findCurrentFavorite(ctx: ExtensionContext) {
     const provider = ctx.model?.provider;
     const model = ctx.model?.id;
-    const thinking = pi.getThinkingLevel?.();
+    const thinking = pi.getThinkingLevel();
     const index = config.favorites.findIndex((fav) =>
       fav.provider === provider && fav.model === model && (!fav.thinkingLevel || fav.thinkingLevel === thinking)
     );
@@ -178,7 +178,7 @@ export default function modelFavoritesExtension(pi: ExtensionAPI) {
           name,
           provider: ctx.model.provider,
           model: ctx.model.id,
-          thinkingLevel: pi.getThinkingLevel?.(),
+          thinkingLevel: pi.getThinkingLevel(),
         };
         config.favorites.push(fav);
         saveConfig(config);

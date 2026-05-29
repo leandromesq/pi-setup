@@ -872,6 +872,11 @@ export default function (pi: ExtensionAPI) {
         name: "dispatch_agent",
         label: "Dispatch Agent",
         description: "Dispatch a task to a specialist agent from the active team. The agent executes and returns results.",
+        promptSnippet: "Dispatch focused tasks to specialist agents from the active team",
+        promptGuidelines: [
+            "Use dispatch_agent in team mode for implementation, review, and substantial investigation instead of doing that work directly.",
+            "Use dispatch_agent with one clear objective per task and only agents listed in the active team prompt.",
+        ],
         parameters: Type.Object({
             agent: Type.String({ description: "Agent name (case-insensitive, as listed in the system prompt)" }),
             task: Type.String({ description: "Task description for the agent to execute" }),
@@ -911,6 +916,11 @@ export default function (pi: ExtensionAPI) {
         name: "run_chain",
         label: "Run Chain",
         description: "Execute the active agent chain pipeline sequentially. Each step's output feeds into the next as $INPUT.",
+        promptSnippet: "Run the active sequential agent chain pipeline",
+        promptGuidelines: [
+            "Use run_chain in chain mode for significant work that benefits from the full active pipeline.",
+            "Use run_chain with the original user task; each chain step receives the previous step output as $INPUT.",
+        ],
         parameters: Type.Object({ task: Type.String({ description: "The task/prompt for the chain to process" }) }),
         async execute(_id, params, _signal, onUpdate, ctx) {
             const { task } = params as { task: string };
@@ -1221,5 +1231,14 @@ ${catalog}
         );
 
         applyMode(ctx);
+    });
+
+    pi.on("session_shutdown", async (_event, ctx) => {
+        if (widgetCtx === ctx) widgetCtx = undefined;
+        if (ctx.hasUI) {
+            ctx.ui.setWidget("agent-team", undefined);
+            ctx.ui.setWidget("agent-chain", undefined);
+            ctx.ui.setStatus("orchestrator", undefined);
+        }
     });
 }

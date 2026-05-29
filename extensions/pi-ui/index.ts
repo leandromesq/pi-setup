@@ -415,7 +415,11 @@ export default function (pi: ExtensionAPI) {
   }
 
   function installEditor(ctx: ExtensionContext) {
-    ctx.ui.setEditorComponent((tui: TUI, theme: EditorTheme, keybindings: KeybindingsManager) => {
+    const previousFactory = ctx.ui.getEditorComponent?.();
+    const ownPreviousFactory = previousFactory && (previousFactory as any).__piSetupFixedEditor;
+    const factory = (tui: TUI, theme: EditorTheme, keybindings: KeybindingsManager) => {
+      if (previousFactory && !ownPreviousFactory) return previousFactory(tui, theme, keybindings);
+
       class FixedPiEditor extends CustomEditor {
         constructor() {
           super(tui, theme, keybindings);
@@ -429,7 +433,9 @@ export default function (pi: ExtensionAPI) {
       }
 
       return new FixedPiEditor();
-    });
+    };
+    (factory as any).__piSetupFixedEditor = true;
+    ctx.ui.setEditorComponent(factory);
   }
 
   function stopWorkingTimer() {
@@ -508,12 +514,12 @@ export default function (pi: ExtensionAPI) {
     requestFooterRender?.();
   });
 
-  pi.on("session_shutdown", (_event, ctx) => {
+  pi.on("session_shutdown", (event, ctx) => {
     if (!ctx.hasUI) return;
     stopWorkingTimer();
     ctx.ui.setWorkingMessage();
     ctx.ui.setHeader(undefined);
-    teardownFixedEditor({ resetExtendedKeyboardModes: true });
+    teardownFixedEditor({ resetExtendedKeyboardModes: event.reason === "quit" });
     ctx.ui.setEditorComponent(undefined);
     ctx.ui.setFooter(undefined);
     ctx.ui.setWorkingIndicator();
