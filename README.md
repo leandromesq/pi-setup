@@ -45,16 +45,30 @@ Commands:
 
 Adds `/agent` for selecting a foreground agent and `/mode` for selecting orchestration mode (`standard`, `agent`, `team`, or `chain`). Foreground agents are normal agent `.md` files with `role: foreground` or `role: both`; they can restrict callable background subagents with `background_agents`. If no agents are marked foreground, all discovered agents are selectable so names/themes can be changed freely. `team` mode allows read/search plus specialist dispatch; `chain` mode runs repeatable pipelines.
 
+Bundled foreground agents:
+
+- `planner` — writes implementation plans under `.olympus/`.
+- `worker` — everyday foreground development agent.
+- `plan-runner` — implements existing `.olympus/` plans.
+- `builder` — autonomous plan-and-implement foreground agent.
+
+Bundled background agents:
+
+- `explorer` — merged code explorer, docs/web researcher, and non-text asset inspector.
+- `advisor` — pre-planning consultant.
+- `critic` — post-plan/post-implementation reviewer.
+- `coder` — focused background implementation agent.
+
 Agent frontmatter:
 
 ```yaml
 ---
-name: daily-worker
+name: worker
 role: foreground
 description: Everyday foreground agent
-tools: read,grep,find,ls,subagent
-background_agents: code-scout, researcher, implementer
-model: openrouter/google/gemini-2.5-flash
+tools: read,write,edit,bash,subagent
+background_agents: explorer, advisor, critic, coder
+model: openai-codex/gpt-5.5
 thinking: medium
 ---
 ```

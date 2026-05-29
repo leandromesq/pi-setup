@@ -108,6 +108,7 @@ interface ExtensionConfig {
 }
 
 const EXT_DIR = path.dirname(fileURLToPath(import.meta.url));
+const DEFAULT_AGENTS_DIR = path.join(EXT_DIR, "agents");
 const AGENTS_DIR = path.join(os.homedir(), ".pi", "agent", "agents");
 const TOOLS_DIR = path.join(EXT_DIR, "tools");
 const CONFIG_PATH = path.join(EXT_DIR, "config.json");
@@ -186,36 +187,41 @@ function allowedBackgroundAgents(): AgentConfig[] {
 
 function loadAgents(): AgentConfig[] {
     const result: AgentConfig[] = [];
-    if (!fs.existsSync(AGENTS_DIR)) return result;
-    for (const entry of fs.readdirSync(AGENTS_DIR)) {
-        if (!entry.endsWith(".md")) continue;
-        const filePath = path.join(AGENTS_DIR, entry);
-        const content = fs.readFileSync(filePath, "utf-8");
-        const { frontmatter, body } = parseFrontmatter<Record<string, string>>(content);
-        if (!frontmatter.name) continue;
-        const tools = (frontmatter.tools || "")
-            .split(",")
-            .map((t) => t.trim())
-            .filter(Boolean);
-        const rawSubagentAgents = (frontmatter as Record<string, string>).subagent_agents ?? (frontmatter as Record<string, string>).background_agents;
-        const subagentAgents = rawSubagentAgents
-            ? rawSubagentAgents.split(",").map((t) => t.trim()).filter(Boolean)
-            : undefined;
-        const fallbackModel = (frontmatter as Record<string, string>).fallback_model?.trim() || undefined;
-        const rawRole = (frontmatter as Record<string, string>).role?.trim().toLowerCase();
-        const role = rawRole === "foreground" || rawRole === "background" || rawRole === "both" ? rawRole : undefined;
-        result.push({
-            name: frontmatter.name,
-            description: frontmatter.description || "",
-            tools,
-            model: frontmatter.model || "anthropic/claude-sonnet-4-6",
-            thinking: frontmatter.thinking || "medium",
-            systemPrompt: body,
-            filePath,
-            role,
-            subagentAgents,
-            fallbackModel,
-        });
+    for (const dir of [DEFAULT_AGENTS_DIR, AGENTS_DIR]) {
+        if (!fs.existsSync(dir)) continue;
+        for (const entry of fs.readdirSync(dir)) {
+            if (!entry.endsWith(".md")) continue;
+            const filePath = path.join(dir, entry);
+            const content = fs.readFileSync(filePath, "utf-8");
+            const { frontmatter, body } = parseFrontmatter<Record<string, string>>(content);
+            if (!frontmatter.name) continue;
+            const tools = (frontmatter.tools || "")
+                .split(",")
+                .map((t) => t.trim())
+                .filter(Boolean);
+            const rawSubagentAgents = (frontmatter as Record<string, string>).subagent_agents ?? (frontmatter as Record<string, string>).background_agents;
+            const subagentAgents = rawSubagentAgents
+                ? rawSubagentAgents.split(",").map((t) => t.trim()).filter(Boolean)
+                : undefined;
+            const fallbackModel = (frontmatter as Record<string, string>).fallback_model?.trim() || undefined;
+            const rawRole = (frontmatter as Record<string, string>).role?.trim().toLowerCase();
+            const role = rawRole === "foreground" || rawRole === "background" || rawRole === "both" ? rawRole : undefined;
+            const config = {
+                name: frontmatter.name,
+                description: frontmatter.description || "",
+                tools,
+                model: frontmatter.model || "anthropic/claude-sonnet-4-6",
+                thinking: frontmatter.thinking || "medium",
+                systemPrompt: body,
+                filePath,
+                role,
+                subagentAgents,
+                fallbackModel,
+            } satisfies AgentConfig;
+            const existingIndex = result.findIndex((agent) => agent.name.toLowerCase() === config.name.toLowerCase());
+            if (existingIndex >= 0) result[existingIndex] = config;
+            else result.push(config);
+        }
     }
     return result;
 }
@@ -731,7 +737,7 @@ export default function (pi: ExtensionAPI) {
         promptSnippet: "Run subagents for delegated tasks",
         promptGuidelines: [
             "Parallel tool calls are your primary parallelism mechanism — put multiple independent read/fetch/search calls in one function_calls block. Don't use subagents to parallelize simple I/O.",
-            "Use subagent to delegate *reasoning and decisions*: codebase exploration (scout), web research (researcher), or isolated code changes (worker)",
+            "Use subagent to delegate *reasoning and decisions*: exploration/research (explorer), review (critic), advice (advisor), or isolated code changes (coder)",
             "For multiple independent subagent tasks, emit multiple `subagent` tool calls in the same turn — they run in parallel automatically.",
             "Subagents have NO context from the current conversation — include ALL necessary context in the task description",
         ],

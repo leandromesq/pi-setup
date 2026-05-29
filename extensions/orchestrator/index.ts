@@ -24,8 +24,8 @@
  *     Commands: /chain  /chain-list  /chain-run <task>
  *
  * Agents can declare `subagent` in their tools frontmatter to spawn sub-processes
- * via the subagents extension. Use `background_agents: scout, researcher` on
- * foreground agents or `subagent_agents: scout, researcher` on background agents
+ * via the subagents extension. Use `background_agents: explorer, critic` on
+ * foreground agents or `subagent_agents: explorer, critic` on background agents
  * to restrict which agents they can spawn.
  *
  * Mode + active team/chain persists across /new via ~/.pi/agent/orchestrator-prefs.json
@@ -53,6 +53,7 @@ const BUILTIN_TOOLS = new Set(["read", "write", "edit", "bash", "grep", "find", 
 // Add entries here for any custom tool an agent .md file might declare.
 const EXT_BASE = path.join(os.homedir(), ".pi", "agent", "extensions");
 const SUBAGENTS_EXT = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "subagents", "index.ts");
+const DEFAULT_AGENTS_DIR = path.join(path.dirname(SUBAGENTS_EXT), "agents");
 const CUSTOM_TOOL_EXTENSIONS: Record<string, string> = {
     subagent: SUBAGENTS_EXT,
     web_search: path.join(EXT_BASE, "web-search", "index.ts"),
@@ -204,6 +205,7 @@ function parseAgentFile(filePath: string): AgentDef | null {
 function scanAgentDirs(cwd: string): AgentDef[] {
     // Global dir first so project dirs can override
     const dirs = [
+        DEFAULT_AGENTS_DIR,
         GLOBAL_AGENTS_DIR,
         path.join(cwd, "agents"),
         path.join(cwd, ".claude", "agents"),
@@ -495,6 +497,7 @@ export default function (pi: ExtensionAPI) {
 
         teams = {};
         for (const tp of [
+            path.join(DEFAULT_AGENTS_DIR, "teams.yaml"),
             path.join(GLOBAL_AGENTS_DIR, "teams.yaml"),
             path.join(cwd, ".pi", "agents", "teams.yaml"),
         ]) {
@@ -521,6 +524,7 @@ export default function (pi: ExtensionAPI) {
 
         chains = [];
         for (const cp of [
+            path.join(DEFAULT_AGENTS_DIR, "agent-chain.yaml"),
             path.join(GLOBAL_AGENTS_DIR, "agent-chain.yaml"),
             path.join(cwd, ".pi", "agents", "agent-chain.yaml"),
         ]) {
@@ -1269,7 +1273,7 @@ You can ONLY dispatch to agents listed below.
 - You may use read/search tools for quick context checks
 - Do not write, edit, or execute code directly in team mode
 - Use dispatch_agent for implementation, review, and substantial investigation
-- You can chain agents: scout/planner first, then builder/coder
+- You can chain agents: explorer/advisor first, then coder/critic
 - Keep tasks focused — one clear objective per dispatch
 
 ## Agents

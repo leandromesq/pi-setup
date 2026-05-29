@@ -1,0 +1,15 @@
+default:
+  - explorer
+  - advisor
+  - critic
+  - coder
+
+implementation:
+  - explorer
+  - coder
+  - critic
+
+planning:
+  - explorer
+  - advisor
+  - critic
