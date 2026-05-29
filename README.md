@@ -43,25 +43,28 @@ Commands:
 
 ### `orchestrator`
 
-Adds `/mode` for selecting the active orchestration mode (`subagent`, `team`, or `chain`) from a picker, plus subagent/team/chain commands and tools. `subagent` mode gives the model subagent tools for day-to-day parallel scouting; `team` mode allows read/search plus specialist dispatch; `chain` mode runs repeatable pipelines. Team and chain agents may define optional `model` and `thinking` frontmatter fields.
+Adds `/agent` for selecting a foreground agent and `/mode` for selecting orchestration mode (`standard`, `agent`, `team`, or `chain`). Foreground agents are normal agent `.md` files with `role: foreground` or `role: both`; they can restrict callable background subagents with `background_agents`. If no agents are marked foreground, all discovered agents are selectable so names/themes can be changed freely. `team` mode allows read/search plus specialist dispatch; `chain` mode runs repeatable pipelines.
 
 Agent frontmatter:
 
 ```yaml
 ---
-name: scout
-description: Fast codebase reconnaissance
-tools: read,grep,find,ls
+name: daily-worker
+role: foreground
+description: Everyday foreground agent
+tools: read,grep,find,ls,subagent
+background_agents: code-scout, researcher, implementer
 model: openrouter/google/gemini-2.5-flash
-thinking: off
+thinking: medium
 ---
 ```
 
 Commands:
 
+- `/agent` — pick a foreground agent.
+- `/agent <name>` — switch directly to a foreground agent.
 - `/mode` — pick an orchestration mode.
-- `/mode status` — show current mode, active team/chain, subagents, and tools.
-- `/sub <task>` — spawn a background subagent.
+- `/mode status` — show current mode, foreground agent, active team/chain, and tools.
 - `/team` — select a team and switch to team mode.
 - `/team-list` — list active team agents.
 - `/agents-grid <1-6>` — set team widget columns.

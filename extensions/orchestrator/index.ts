@@ -1,10 +1,14 @@
 /**
  * Agent Orchestrator — Team dispatch and chain pipeline
  *
- * Three orchestration modes, switch with /mode:
+ * Orchestration modes, switch with /mode:
  *
  *   standard (default)
  *     Normal Pi agent — all default codebase tools are available.
+ *
+ *   agent
+ *     Foreground agent selected with /agent. Foreground agents can declare
+ *     background_agents to restrict which subagents they may call.
  *
  *   team
  *     Dispatcher-only orchestrator — main agent has NO codebase write/edit tools.
@@ -20,8 +24,9 @@
  *     Commands: /chain  /chain-list  /chain-run <task>
  *
  * Agents can declare `subagent` in their tools frontmatter to spawn sub-processes
- * via the subagents extension. Use `subagent_agents: scout, researcher` to restrict
- * which agents they can spawn (enforced via PI_SUBAGENT_ALLOWED env).
+ * via the subagents extension. Use `background_agents: scout, researcher` on
+ * foreground agents or `subagent_agents: scout, researcher` on background agents
+ * to restrict which agents they can spawn.
  *
  * Mode + active team/chain persists across /new via ~/.pi/agent/orchestrator-prefs.json
  */
@@ -84,10 +89,12 @@ function getSpawnOptions(childEnv?: NodeJS.ProcessEnv): any {
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
-type OrchestratorMode = "standard" | "team" | "chain";
+type OrchestratorMode = "standard" | "agent" | "team" | "chain";
+type AgentRole = "foreground" | "background" | "both";
 
 interface OrchestratorPrefs {
     mode: OrchestratorMode;
+    activeAgent?: string;
     activeTeam?: string;
     activeChain?: string;
 }
@@ -100,6 +107,9 @@ interface AgentDef {
     model?: string;
     thinking?: string;
     file?: string;
+    role?: AgentRole;
+    /** Background agents this foreground agent may call through the subagent tool. */
+    backgroundAgents?: string[];
     /** If `subagent` is in tools, restrict which agents this agent may spawn. */
     subagentAgents?: string[];
 }
@@ -141,7 +151,7 @@ function loadPrefs(): OrchestratorPrefs {
     try {
         const raw = fs.readFileSync(PREFS_FILE, "utf-8");
         const data = JSON.parse(raw);
-        if (["standard", "team", "chain"].includes(data.mode)) return data as OrchestratorPrefs;
+        if (["standard", "agent", "team", "chain"].includes(data.mode)) return data as OrchestratorPrefs;
     } catch {}
     return { mode: "standard" };
 }
@@ -154,6 +164,11 @@ function savePrefs(prefs: OrchestratorPrefs) {
 
 function displayName(name: string): string {
     return name.split("-").map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(" ");
+}
+
+function splitList(value: string | undefined): string[] | undefined {
+    const items = value?.split(",").map(s => s.trim()).filter(Boolean) ?? [];
+    return items.length > 0 ? items : undefined;
 }
 
 function parseAgentFile(filePath: string): AgentDef | null {
@@ -169,6 +184,8 @@ function parseAgentFile(filePath: string): AgentDef | null {
         }
         if (!fm.name) return null;
 
+        const rawRole = fm.role?.toLowerCase();
+        const role = rawRole === "foreground" || rawRole === "background" || rawRole === "both" ? rawRole : undefined;
         return {
             name: fm.name,
             description: fm.description || "",
@@ -177,9 +194,9 @@ function parseAgentFile(filePath: string): AgentDef | null {
             model: fm.model || undefined,
             thinking: fm.thinking || undefined,
             file: filePath,
-            subagentAgents: fm.subagent_agents
-                ? fm.subagent_agents.split(",").map(s => s.trim()).filter(Boolean)
-                : undefined,
+            role,
+            backgroundAgents: splitList(fm.background_agents),
+            subagentAgents: splitList(fm.subagent_agents),
         };
     } catch { return null; }
 }
@@ -265,6 +282,7 @@ export default function (pi: ExtensionAPI) {
     let mode: OrchestratorMode = "standard";
     let widgetCtx: any;
     let baseTools: string[] = [];
+    let activeForegroundAgent: AgentDef | undefined;
     const orchestratorToolNames = new Set(["dispatch_agent", "run_chain"]);
 
     // ── Team state ────────────────────────────────────────────────────────────
@@ -288,7 +306,7 @@ export default function (pi: ExtensionAPI) {
     // ── Prefs helpers ─────────────────────────────────────────────────────────
 
     function currentPrefs(): OrchestratorPrefs {
-        return { mode, activeTeam: activeTeamName || undefined, activeChain: activeChain?.name };
+        return { mode, activeAgent: activeForegroundAgent?.name, activeTeam: activeTeamName || undefined, activeChain: activeChain?.name };
     }
 
     // ── Team widget ───────────────────────────────────────────────────────────
@@ -458,7 +476,8 @@ export default function (pi: ExtensionAPI) {
     function updateFooter(ctx: any) {
         if (!ctx) return;
         let modeLabel: string;
-        if (mode === "chain") modeLabel = `chain:${activeChain?.name || "no-chain"}`;
+        if (mode === "agent") modeLabel = `agent:${activeForegroundAgent?.name || "none"}`;
+        else if (mode === "chain") modeLabel = `chain:${activeChain?.name || "no-chain"}`;
         else if (mode === "team") modeLabel = `team:${activeTeamName || "no-team"}`;
         else modeLabel = "standard";
 
@@ -542,6 +561,51 @@ export default function (pi: ExtensionAPI) {
         activeChain = chain;
         stepStates = chain.steps.map(s => ({ agent: s.agent, status: "pending" as const, elapsed: 0, lastWork: "" }));
         if (!pendingReset) updateChainWidget();
+    }
+
+    function foregroundAgents(): AgentDef[] {
+        const marked = allAgentDefs.filter(def => def.role === "foreground" || def.role === "both");
+        return marked.length > 0 ? marked : allAgentDefs;
+    }
+
+    function backgroundAgentsFor(def: AgentDef | undefined): AgentDef[] {
+        const allowed = def?.backgroundAgents ?? def?.subagentAgents;
+        const backgroundDefs = allAgentDefs.filter(candidate => candidate.role !== "foreground" && candidate.name.toLowerCase() !== def?.name.toLowerCase());
+        if (!allowed || allowed.length === 0) return backgroundDefs;
+        const allowedSet = new Set(allowed.map(name => name.toLowerCase()));
+        return backgroundDefs.filter(candidate => allowedSet.has(candidate.name.toLowerCase()));
+    }
+
+    function setSubagentAllowlist(def: AgentDef | undefined) {
+        const allowed = def ? backgroundAgentsFor(def).map(agent => agent.name) : undefined;
+        (globalThis as any).__pi_subagents?.setAllowedAgents?.(allowed);
+    }
+
+    function resolveAgent(name: string, candidates = allAgentDefs): AgentDef | undefined {
+        const normalized = name.toLowerCase();
+        return candidates.find(def => def.name.toLowerCase() === normalized)
+            ?? candidates.find(def => def.name.toLowerCase().replace(/\s+/g, "-") === normalized);
+    }
+
+    async function applyForegroundAgent(def: AgentDef, ctx: any) {
+        activeForegroundAgent = def;
+        mode = "agent";
+        setSubagentAllowlist(def);
+
+        const slash = def.model?.indexOf("/") ?? -1;
+        if (def.model && slash > 0) {
+            const model = ctx.modelRegistry.find(def.model.slice(0, slash), def.model.slice(slash + 1));
+            if (model) {
+                const ok = await pi.setModel(model);
+                if (!ok) ctx.ui.notify(`Could not switch to ${def.model}; auth may be missing`, "warning");
+            } else {
+                ctx.ui.notify(`Foreground agent model not found: ${def.model}`, "warning");
+            }
+        }
+        if (def.thinking) pi.setThinkingLevel(def.thinking as any);
+
+        savePrefs(currentPrefs());
+        applyMode(ctx);
     }
 
     // ── Model helpers ─────────────────────────────────────────────────────────
@@ -838,6 +902,12 @@ export default function (pi: ExtensionAPI) {
 
     function activeToolsForMode(): string[] {
         if (mode === "standard") return Array.from(new Set(baseTools));
+        if (mode === "agent" && activeForegroundAgent) {
+            const available = new Set(pi.getAllTools().map(tool => tool.name));
+            const requested = activeForegroundAgent.tools.split(",").map(tool => tool.trim()).filter(Boolean);
+            const selected = requested.filter(tool => available.has(tool));
+            return Array.from(new Set(selected.length > 0 ? selected : baseTools));
+        }
         if (mode === "team") return Array.from(new Set([...readSearchTools(), "dispatch_agent"]));
         return Array.from(new Set([...baseTools, "run_chain"]));
     }
@@ -849,11 +919,17 @@ export default function (pi: ExtensionAPI) {
         ctx.ui.setWidget("agent-chain", undefined);
 
         if (mode === "standard") {
+            setSubagentAllowlist(undefined);
             ctx.ui.setStatus("orchestrator", "Mode: standard");
+        } else if (mode === "agent") {
+            setSubagentAllowlist(activeForegroundAgent);
+            ctx.ui.setStatus("orchestrator", `Agent: ${activeForegroundAgent?.name || "none"}`);
         } else if (mode === "team") {
+            setSubagentAllowlist(undefined);
             updateTeamWidget();
             ctx.ui.setStatus("orchestrator", `Mode: team · ${activeTeamName} (${agentStates.size})`);
         } else {
+            setSubagentAllowlist(undefined);
             updateChainWidget();
             ctx.ui.setStatus("orchestrator", `Mode: chain · ${activeChain?.name || "no chain"}`);
         }
@@ -951,6 +1027,43 @@ export default function (pi: ExtensionAPI) {
 
     // ── Commands ──────────────────────────────────────────────────────────────
 
+    pi.registerCommand("agent", {
+        description: "Select a foreground agent: /agent or /agent <name>",
+        getArgumentCompletions: (prefix): AutocompleteItem[] | null => {
+            const query = prefix.trim().toLowerCase();
+            const items = foregroundAgents()
+                .filter(def => !query || def.name.toLowerCase().includes(query))
+                .map(def => ({ value: def.name, label: def.name, description: def.description }));
+            return items.length > 0 ? items : null;
+        },
+        handler: async (args, ctx) => {
+            widgetCtx = ctx;
+            const candidates = foregroundAgents();
+            if (candidates.length === 0) {
+                ctx.ui.notify("No agents found. Add agent .md files to ~/.pi/agent/agents/ or .pi/agents/.", "warning");
+                return;
+            }
+
+            let selectedName = args?.trim();
+            if (!selectedName) {
+                const labels = candidates.map(def => `${def.name}${activeForegroundAgent?.name === def.name ? " ◀ current" : ""} — ${def.description || "no description"}`);
+                const choice = await ctx.ui.select("Select Foreground Agent", labels);
+                if (choice === undefined) return;
+                selectedName = candidates[labels.indexOf(choice)]?.name;
+            }
+
+            const def = selectedName ? resolveAgent(selectedName, candidates) : undefined;
+            if (!def) {
+                ctx.ui.notify(`Foreground agent not found: ${selectedName}\nAvailable: ${candidates.map(agent => agent.name).join(", ")}`, "error");
+                return;
+            }
+
+            await applyForegroundAgent(def, ctx);
+            const backgrounds = backgroundAgentsFor(def).map(agent => agent.name).join(", ") || "none";
+            ctx.ui.notify(`Foreground agent: ${def.name}\nBackground agents: ${backgrounds}`, "info");
+        },
+    });
+
     pi.registerCommand("mode", {
         description: "Select orchestration mode",
         handler: async (args, ctx) => {
@@ -958,16 +1071,18 @@ export default function (pi: ExtensionAPI) {
             let newMode = args?.trim();
 
             if (newMode === "status") {
+                const foregroundInfo = activeForegroundAgent ? `${activeForegroundAgent.name} (${backgroundAgentsFor(activeForegroundAgent).length} background agents)` : `${foregroundAgents().length} foreground agent(s) loaded`;
                 const teamInfo = activeTeamName ? `${activeTeamName} (${agentStates.size} agents)` : `${Object.keys(teams).length} team(s) loaded`;
                 const chainInfo = activeChain ? `${activeChain.name} (${activeChain.steps.length} steps)` : `${chains.length} chain(s) loaded`;
-                ctx.ui.notify(`Mode: ${mode}\nTeam: ${teamInfo}\nChain: ${chainInfo}\nTools: ${activeToolsForMode().join(", ")}`, "info");
+                ctx.ui.notify(`Mode: ${mode}\nAgent: ${foregroundInfo}\nTeam: ${teamInfo}\nChain: ${chainInfo}\nTools: ${activeToolsForMode().join(", ")}`, "info");
                 return;
             }
 
             if (!newMode) {
-                const modeValues: OrchestratorMode[] = ["standard", "team", "chain"];
+                const modeValues: OrchestratorMode[] = ["standard", "agent", "team", "chain"];
                 const optionLabels = modeValues.map(value => {
                     if (value === "standard") return `standard${mode === value ? " ◀ current" : ""} — normal Pi agent with default tools`;
+                    if (value === "agent") return `agent${mode === value ? " ◀ current" : ""} — foreground agent (${activeForegroundAgent?.name || foregroundAgents().length + " agents"})`;
                     if (value === "team") return `team${mode === value ? " ◀ current" : ""} — dispatcher with specialist agent grid (${activeTeamName || Object.keys(teams).length + " teams"})`;
                     return `chain${mode === value ? " ◀ current" : ""} — sequential pipeline (${activeChain?.name || chains.length + " chains"})`;
                 });
@@ -976,10 +1091,17 @@ export default function (pi: ExtensionAPI) {
                 newMode = modeValues[optionLabels.indexOf(choice)];
             }
 
-            if (!["standard", "team", "chain"].includes(newMode)) {
-                ctx.ui.notify("Invalid mode. Use: standard, team, or chain", "error"); return;
+            if (!["standard", "agent", "team", "chain"].includes(newMode)) {
+                ctx.ui.notify("Invalid mode. Use: standard, agent, team, or chain", "error"); return;
             }
             if (newMode === mode) { ctx.ui.notify(`Already in ${mode} mode`, "info"); return; }
+            if (newMode === "agent" && !activeForegroundAgent) {
+                const def = foregroundAgents()[0];
+                if (!def) { ctx.ui.notify("No foreground agents available. Use /agent after adding agent .md files.", "warning"); return; }
+                await applyForegroundAgent(def, ctx);
+                ctx.ui.notify(`Foreground agent: ${def.name}`, "info");
+                return;
+            }
 
             switchMode(newMode as OrchestratorMode, ctx);
             ctx.ui.notify(`Switched to ${mode} mode`, "info");
@@ -1083,13 +1205,43 @@ export default function (pi: ExtensionAPI) {
 
     // ── before_agent_start ────────────────────────────────────────────────────
 
-    pi.on("before_agent_start", async (_event, ctx) => {
+    pi.on("before_agent_start", async (event, ctx) => {
         // Chain mode: reset step states on first turn of a new session
         if (pendingReset && activeChain && mode === "chain") {
             pendingReset = false;
             widgetCtx = ctx;
             stepStates = activeChain.steps.map(s => ({ agent: s.agent, status: "pending" as const, elapsed: 0, lastWork: "" }));
             updateChainWidget();
+        }
+
+        if (mode === "agent" && activeForegroundAgent) {
+            const backgrounds = backgroundAgentsFor(activeForegroundAgent);
+            const backgroundCatalog = backgrounds.length > 0
+                ? backgrounds.map(def => `- ${def.name}: ${def.description || "no description"}`).join("\n")
+                : "- none";
+
+            return {
+                systemPrompt: `${event.systemPrompt}
+
+## Foreground Agent Mode
+
+You are the foreground agent for this Pi session.
+
+## Active Foreground Agent: ${activeForegroundAgent.name}
+${activeForegroundAgent.description ? `Description: ${activeForegroundAgent.description}\n` : ""}
+## Available Background Agents
+${backgroundCatalog}
+
+## Foreground / Background Rules
+- You are the active foreground agent: keep ownership of user-facing reasoning, decisions, and final responses.
+- Use the subagent tool only for background agents listed above.
+- Delegate focused research, exploration, review, or implementation tasks when that improves locality or parallelism.
+- Include all necessary context when calling background agents; they do not inherit this conversation.
+
+## Foreground Agent Instructions
+
+${activeForegroundAgent.systemPrompt}`,
+            };
         }
 
         if (mode === "team") {
@@ -1204,6 +1356,8 @@ ${catalog}
 
         const prefs = loadPrefs();
         mode = prefs.mode;
+        activeForegroundAgent = prefs.activeAgent ? resolveAgent(prefs.activeAgent, foregroundAgents()) : foregroundAgents()[0];
+        if (mode === "agent" && !activeForegroundAgent) mode = "standard";
 
         const teamToActivate = (prefs.activeTeam && teams[prefs.activeTeam]) ? prefs.activeTeam : Object.keys(teams)[0];
         if (teamToActivate) activateTeam(teamToActivate);
@@ -1221,10 +1375,15 @@ ${catalog}
             ? `${chains.length} chains · ${activeChain?.name || "none"} active`
             : "no chains";
 
+        const agentSummary = activeForegroundAgent
+            ? `${foregroundAgents().length} foreground agents · ${activeForegroundAgent.name} active`
+            : `${foregroundAgents().length} foreground agents`;
+
         ctx.ui.notify(
             `Agent Orchestrator · mode: ${mode}\n\n` +
-            `/mode [standard|team|chain|status]\n\n` +
+            `/agent [name]  /mode [standard|agent|team|chain|status]\n\n` +
             `standard: normal Pi agent with default read/write/edit/bash tools\n` +
+            `agent (${agentSummary}): foreground agent with allowed background subagents\n` +
             `team (${teamSummary}): /team  /team-list  /agents-grid\n` +
             `chain (${chainSummary}): /chain  /chain-list  /chain-run`,
             "info"

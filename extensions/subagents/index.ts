@@ -32,6 +32,7 @@ export interface AgentConfig {
     thinking: string;
     systemPrompt: string;
     filePath: string;
+    role?: "foreground" | "background" | "both";
     /**
      * If this agent has the `subagent` tool, restrict which agents it may spawn.
      * Passed to the child pi process via `PI_SUBAGENT_ALLOWED` so the child's
@@ -143,6 +144,7 @@ const CUSTOM_TOOL_EXTENSIONS: Record<string, string> = {
 // ── Agent Discovery & Registration ────────────────────────────────────────────
 
 let agents: AgentConfig[] = [];
+let runtimeAllowedAgents: string[] | undefined;
 
 // Read once at module load. If we're a child subagent process whose parent
 // pinned an allowlist, we silently ignore any agent (built-in OR registered
@@ -166,9 +168,21 @@ export function unregisterAgent(name: string): void {
     agents = agents.filter((a) => a.name !== name);
 }
 
+export function setAllowedAgents(names: string[] | undefined): void {
+    runtimeAllowedAgents = names?.length ? names.map((name) => name.toLowerCase()) : undefined;
+}
+
+function allowedBackgroundAgents(): AgentConfig[] {
+    return agents.filter((agent) => {
+        if (agent.role === "foreground") return false;
+        if (!runtimeAllowedAgents) return true;
+        return runtimeAllowedAgents.includes(agent.name.toLowerCase());
+    });
+}
+
 // Expose registration functions globally so other extensions loaded via jiti
 // (which creates separate module instances) can access the shared agents array.
-(globalThis as any).__pi_subagents = { registerAgent, unregisterAgent };
+(globalThis as any).__pi_subagents = { registerAgent, unregisterAgent, setAllowedAgents };
 
 function loadAgents(): AgentConfig[] {
     const result: AgentConfig[] = [];
@@ -183,11 +197,13 @@ function loadAgents(): AgentConfig[] {
             .split(",")
             .map((t) => t.trim())
             .filter(Boolean);
-        const rawSubagentAgents = (frontmatter as Record<string, string>).subagent_agents;
+        const rawSubagentAgents = (frontmatter as Record<string, string>).subagent_agents ?? (frontmatter as Record<string, string>).background_agents;
         const subagentAgents = rawSubagentAgents
             ? rawSubagentAgents.split(",").map((t) => t.trim()).filter(Boolean)
             : undefined;
         const fallbackModel = (frontmatter as Record<string, string>).fallback_model?.trim() || undefined;
+        const rawRole = (frontmatter as Record<string, string>).role?.trim().toLowerCase();
+        const role = rawRole === "foreground" || rawRole === "background" || rawRole === "both" ? rawRole : undefined;
         result.push({
             name: frontmatter.name,
             description: frontmatter.description || "",
@@ -196,6 +212,7 @@ function loadAgents(): AgentConfig[] {
             thinking: frontmatter.thinking || "medium",
             systemPrompt: body,
             filePath,
+            role,
             subagentAgents,
             fallbackModel,
         });
@@ -732,10 +749,11 @@ export default function (pi: ExtensionAPI) {
                 );
             }
 
-            const agent = agents.find((a) => a.name === params.agent);
+            const availableAgents = allowedBackgroundAgents();
+            const agent = availableAgents.find((a) => a.name.toLowerCase() === params.agent.toLowerCase());
             if (!agent) {
-                const available = agents.map((a) => a.name).join(", ") || "none";
-                throw new Error(`Unknown agent: ${params.agent}. Available agents: ${available}`);
+                const available = availableAgents.map((a) => a.name).join(", ") || "none";
+                throw new Error(`Unknown or unavailable background agent: ${params.agent}. Available agents: ${available}`);
             }
 
             const [provider, modelId] = (agent.model || "").split("/");
