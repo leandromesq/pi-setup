@@ -382,7 +382,7 @@ async function saveSelection(enabledIds: Iterable<string>, cwd: string): Promise
 }
 
 function formatExtensionList(selection: Set<string>): string {
-  return EXTENSIONS.map((extension) => `${selection.has(extension.id) ? "☑" : "☐"} ${extension.id}`).join("\n");
+  return EXTENSIONS.map((extension) => `${selection.has(extension.id) || extension.locked ? "■" : "☐"} ${extension.id}`).join("\n");
 }
 
 function parsePresetFile(raw: PresetFile): Record<string, PresetDefinition> {
@@ -478,9 +478,14 @@ class SetupCheckboxMenu {
       return;
     }
     if (matchesKey(data, Key.space)) {
-      const id = EXTENSIONS[this.selectedIndex]?.id;
-      if (id) {
-        const next = toggleSelection(this.selection, id);
+      const extension = EXTENSIONS[this.selectedIndex];
+      if (extension?.locked) {
+        this.selection.add(extension.id);
+        this.invalidate();
+        return;
+      }
+      if (extension) {
+        const next = toggleSelection(this.selection, extension.id);
         this.selection.clear();
         for (const nextId of next) this.selection.add(nextId);
         this.invalidate();
@@ -520,7 +525,7 @@ class SetupCheckboxMenu {
     for (let index = 0; index < EXTENSIONS.length; index += 1) {
       const extension = EXTENSIONS[index];
       const selected = index === this.selectedIndex;
-      const checked = this.selection.has(extension.id) ? "☑" : "☐";
+      const checked = this.selection.has(extension.id) || extension.locked ? "■" : "☐";
       const lock = extension.locked ? " locked" : "";
       const deps = extension.dependencies?.length ? ` needs ${extension.dependencies.join(",")}` : "";
       const prefix = selected ? "›" : " ";
