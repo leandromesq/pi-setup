@@ -1,10 +1,32 @@
-# Leandro Pi Setup
+# Lelezonio Pi Kit
 
-Personal Pi setup package containing global extensions, theme, and bootstrap config.
+Personal Pi kit containing global extensions, themes, and bootstrap config.
 
 Each extension is published as its own Pi extension entry so it can be enabled, disabled, or filtered independently.
 
 ## Extensions
+
+### `lelezonio-pi-kit`
+
+Adds `/setup` and `/preset` for managing which extensions from this personal Pi kit are loaded. `/setup` opens a checkbox-style menu: use arrow keys to navigate, `Space` to toggle extensions, `Enter` or `s` to save and reload, `a` for all extensions, `m` for the minimal profile, and `Esc` to cancel. The kit manager keeps itself enabled so you cannot lock yourself out.
+
+Commands:
+
+- `/setup` — open the extension checkbox menu.
+- `/setup status` — show enabled and disabled kit extensions.
+- `/setup enable <extension>` — enable one extension and reload.
+- `/setup disable <extension>` — disable one extension and reload.
+- `/setup toggle <extension>` — toggle one extension and reload.
+- `/setup full` — enable every kit extension and reload.
+- `/setup minimal` — enable the minimal default set and reload.
+- `/setup save <name>` — save the current extension selection as a preset.
+- `/setup use <name>` — apply a preset by name and reload.
+- `/setup list` — list built-in and saved presets.
+- `/setup delete <name>` — delete a saved preset.
+- `/preset` — choose a setup preset from a picker.
+- `/preset <name>` — apply a setup preset by name.
+- `/preset save <name>` — save the current extension selection as a preset.
+- `/preset delete <name>` — delete a saved preset.
 
 ### `diff`
 
@@ -175,16 +197,16 @@ Install Pi first:
 npm install -g @earendil-works/pi-coding-agent
 ```
 
-Then install this setup from GitHub:
+Then install this kit from GitHub:
 
 ```bash
-npx github:leandromesq/pi-setup
+npx github:leandromesq/lelezonio-pi-kit
 ```
 
 Alternatively, with Pi's package manager:
 
 ```bash
-pi install git:github.com/leandromesq/pi-setup
+pi install git:github.com/leandromesq/lelezonio-pi-kit
 ```
 
 The `npx` bootstrap also adds these packages to `~/.pi/agent/settings.json`:
@@ -193,4 +215,4 @@ The `npx` bootstrap also adds these packages to `~/.pi/agent/settings.json`:
 - `npm:pi-extmgr`
 - `npm:pi-lens` - real-time code feedback with LSP, linters, formatters, type-checking, and Dart/Flutter support via Dart LSP, `dart analyze`, and `dart format` when the Dart/Flutter SDK is on `PATH`.
 - `npm:pi-simplify` - reviews recently changed code for clarity, consistency, and maintainability.
-- `git:github.com/leandromesq/pi-setup`
+- `git:github.com/leandromesq/lelezonio-pi-kit`
